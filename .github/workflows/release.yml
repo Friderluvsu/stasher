@@ -127,15 +127,12 @@ jobs:
           GH_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           test -n "$GH_TOKEN"
-          version="$(node -p "require('./package.json').version")"
-          x64_dmg="$(find dist -maxdepth 1 -type f -name '*-x64.dmg' -print -quit)"
-          test -n "$x64_dmg"
-          cp "$x64_dmg" "dist/Stasher-${version}-x64.dmg"
           files=()
-          while IFS= read -r -d '' file; do files+=("$file"); done < <(find dist -maxdepth 1 -type f \( -name '*-x64.dmg' -o -name '*-x64.zip' -o -name '*-x64*.blockmap' -o -name "Stasher-${version}-x64.dmg" \) -print0)
+          while IFS= read -r -d '' file; do files+=("$file"); done < <(find dist -maxdepth 1 -type f \( -name '*-x64.dmg' -o -name '*-x64.zip' -o -name '*-x64*.blockmap' \) -print0)
           test "$(printf '%s\n' "${files[@]}" | grep -cE -- '-x64\.dmg$')" -ge 1
           test "$(printf '%s\n' "${files[@]}" | grep -cE -- '-x64\.zip$')" -ge 1
           gh release upload "$GITHUB_REF_NAME" "${files[@]}" --repo "$RELEASE_REPOSITORY" --clobber
+
 
   build_mac_arm64:
     name: Build macOS ARM
