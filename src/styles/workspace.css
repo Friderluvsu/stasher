@@ -1,0 +1,55 @@
+.workspace-content {
+  width: calc(100% - 56px);
+  margin: 18px auto 100px;
+}
+
+.page-heading {
+  margin-bottom: 22px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.title-line {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.title-line h1 {
+  margin: 0;
+  font-size: clamp(26px, 2.8vw, 36px);
+  font-weight: 700;
+  letter-spacing: -0.045em;
+  line-height: 1.1;
+}
+
+.title-line span {
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.page-description {
+  max-width: 590px;
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.workspace-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}

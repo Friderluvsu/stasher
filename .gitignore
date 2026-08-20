@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+backend/venv/
+test_venv/
+venv/
+
+# Build outputs
+dist/
+dist-core/
+build/
+backend-bin/
+backend-dist/
+*.spec
+
+# Python cache & artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+
+# Local data & databases
+stasher_data/
+*.db
+*.db-journal
+*.log
+
+# Environment & credentials
+.env
+.env.local
+*.pem
+
+# Editor & OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.vscode/
+.idea/
+*.bak

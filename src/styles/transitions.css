@@ -1,0 +1,103 @@
+/* ==========================================================================
+   EXACT VERSE CLIP REVEAL & SEPARATE BLOCK / TEXT TRANSITIONS
+   ========================================================================== */
+
+.section-cielrose-wrapper {
+  position: relative;
+  width: 100%;
+  min-height: 100%;
+  overflow: hidden;
+}
+
+.section-cielrose-container {
+  width: 100%;
+}
+
+.section-cielrose-container.is-entering-cielrose {
+  will-change: clip-path, transform, opacity;
+  animation: cielroseClipReveal 0.55s cubic-bezier(0.56, 0, 0.35, 0.98) forwards;
+}
+
+@keyframes cielroseClipReveal {
+  0% {
+    clip-path: inset(100% 0 0 0);
+    opacity: 0;
+  }
+  100% {
+    clip-path: inset(0% 0 0 0);
+    opacity: 1;
+  }
+}
+
+/* 🅰️ STEP 1: BLOCKS ANIMATE FIRST (0.00s -> 0.38s) */
+.section-cielrose-container.is-entering-cielrose .workspace-panel,
+.section-cielrose-container.is-entering-cielrose .glass-card,
+.section-cielrose-container.is-entering-cielrose .pattern-card,
+.section-cielrose-container.is-entering-cielrose .sound-card,
+.section-cielrose-container.is-entering-cielrose .kit-card,
+.section-cielrose-container.is-entering-cielrose .stat-card,
+.section-cielrose-container.is-entering-cielrose .scan-banner {
+  opacity: 0;
+  transform: translateY(24px) scale(0.96);
+  will-change: transform, opacity, filter;
+  animation: animateBlockFirst 0.42s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.section-cielrose-container.is-entering-cielrose .glass-card:nth-child(1),
+.section-cielrose-container.is-entering-cielrose .pattern-card:nth-child(1),
+.section-cielrose-container.is-entering-cielrose .sound-card:nth-child(1) { animation-delay: 0.02s; }
+
+.section-cielrose-container.is-entering-cielrose .glass-card:nth-child(2),
+.section-cielrose-container.is-entering-cielrose .pattern-card:nth-child(2),
+.section-cielrose-container.is-entering-cielrose .sound-card:nth-child(2) { animation-delay: 0.06s; }
+
+.section-cielrose-container.is-entering-cielrose .glass-card:nth-child(3),
+.section-cielrose-container.is-entering-cielrose .pattern-card:nth-child(3),
+.section-cielrose-container.is-entering-cielrose .sound-card:nth-child(3) { animation-delay: 0.10s; }
+
+.section-cielrose-container.is-entering-cielrose .glass-card:nth-child(4),
+.section-cielrose-container.is-entering-cielrose .pattern-card:nth-child(4),
+.section-cielrose-container.is-entering-cielrose .sound-card:nth-child(4) { animation-delay: 0.14s; }
+
+.section-cielrose-container.is-entering-cielrose .glass-card:nth-child(5),
+.section-cielrose-container.is-entering-cielrose .pattern-card:nth-child(5),
+.section-cielrose-container.is-entering-cielrose .sound-card:nth-child(5) { animation-delay: 0.18s; }
+
+@keyframes animateBlockFirst {
+  0% {
+    opacity: 0;
+    transform: translateY(24px) scale(0.96);
+    filter: blur(6px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0px);
+  }
+}
+
+/* 🅱️ STEP 2: TEXT ANIMATES AFTER BLOCKS (Starts at 0.34s) */
+.section-cielrose-container.is-entering-cielrose h1,
+.section-cielrose-container.is-entering-cielrose h2,
+.section-cielrose-container.is-entering-cielrose h3,
+.section-cielrose-container.is-entering-cielrose p,
+.section-cielrose-container.is-entering-cielrose label,
+.section-cielrose-container.is-entering-cielrose .eyebrow,
+.section-cielrose-container.is-entering-cielrose .page-description,
+.section-cielrose-container.is-entering-cielrose .title-line {
+  opacity: 0;
+  animation: animateTextAfterBlocks 0.44s cubic-bezier(0.16, 1, 0.3, 1) 0.34s forwards;
+}
+
+@keyframes animateTextAfterBlocks {
+  0% {
+    opacity: 0;
+    transform: translateY(12px);
+    filter: blur(4px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0px);
+  }
+}

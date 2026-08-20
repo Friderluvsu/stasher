@@ -1,0 +1,156 @@
+@font-face {
+  font-family: "Hoves";
+  src: url("/fonts/hoves-regular.ttf") format("truetype");
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Hoves";
+  src: url("/fonts/hoves-medium.ttf") format("truetype");
+  font-weight: 500;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Hoves";
+  src: url("/fonts/hoves-bold.ttf") format("truetype");
+  font-weight: 700;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: light;
+  --page: rgba(225, 232, 240, 0.25);
+  --frame: transparent;
+  --contrast-text: #ffffff;
+  --panel: rgba(210, 220, 230, 0.35);
+  --panel-strong: rgba(190, 204, 218, 0.45);
+  --popover-surface: rgba(215, 225, 235, 0.92);
+  --card: rgba(200, 212, 224, 0.38);
+  --field: rgba(235, 242, 248, 0.45);
+  --text: #111311;
+  --muted: #5d686f;
+  --soft: #818c93;
+  --line: rgba(255, 255, 255, 0.62);
+  --line-dark: rgba(40, 54, 63, 0.12);
+  --accent: #6255dc;
+  --accent-soft: rgba(98, 85, 220, 0.13);
+  --accent-hover: #5145cb;
+  --accent-rgb: 98, 85, 220;
+  --success: #2a8b61;
+  --success-rgb: 42, 139, 97;
+  --danger: #b94b55;
+  --danger-rgb: 185, 75, 85;
+  --warning: #b77828;
+  --glass-shadow: 0 22px 55px rgba(50, 65, 75, 0.13), inset 0 1px 0 rgba(255, 255, 255, 0.76);
+  --window-shadow: 0 30px 80px rgba(37, 50, 58, 0.16);
+  --control-glow: 0 0 0 1px rgba(211, 239, 251, 0.76), 0 0 16px rgba(126, 202, 235, 0.24), 0 0 28px rgba(118, 127, 224, 0.12);
+  --radius-frame: 30px;
+  --radius-panel: 25px;
+  --radius-card: 28px;
+  --radius-control: 999px;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  --verse-page: transparent;
+  --verse-panel: var(--panel);
+  --verse-panel-strong: var(--panel-strong);
+  --verse-card: var(--card);
+  --verse-raised: var(--panel-strong);
+  --verse-field: var(--field);
+  --verse-border: var(--line);
+  --verse-border-dark: var(--line-dark);
+  --verse-text: var(--text);
+  --verse-muted: var(--muted);
+  --verse-subtle: var(--soft);
+  --verse-accent: var(--accent);
+  --verse-accent-hover: var(--accent-hover);
+  --verse-accent-rgb: var(--accent-rgb);
+  --verse-success: var(--success);
+  --verse-success-rgb: var(--success-rgb);
+  --verse-danger: var(--danger);
+  --verse-danger-rgb: var(--danger-rgb);
+  --verse-warning: var(--warning);
+  --verse-container-radius: var(--radius-panel);
+  --verse-card-radius: 20px;
+  --verse-control-radius: var(--radius-control);
+  --verse-icon-radius: 12px;
+  --verse-ui-shadow: var(--glass-shadow);
+  --verse-window-shadow: var(--window-shadow);
+  --verse-control-glow: var(--control-glow);
+  --verse-ui-blur: 28px;
+  --verse-motion-fast: 180ms;
+  --verse-motion-ease: var(--ease);
+}
+
+html[data-theme="dark"],
+body[data-theme="dark"] {
+  color-scheme: dark;
+  --page: rgba(14, 16, 22, 0.25);
+  --frame: transparent;
+  --contrast-text: #121418;
+  --panel: rgba(26, 31, 40, 0.35);
+  --panel-strong: rgba(35, 42, 54, 0.45);
+  --popover-surface: rgba(28, 34, 44, 0.92);
+  --card: rgba(30, 36, 46, 0.38);
+  --field: rgba(18, 22, 29, 0.42);
+  --text: #f3f4f6;
+  --muted: #b0b7c3;
+  --soft: #8a92a1;
+  --line: rgba(255, 255, 255, 0.12);
+  --line-dark: rgba(255, 255, 255, 0.07);
+  --accent: #9a90ff;
+  --accent-soft: rgba(154, 144, 255, 0.16);
+  --accent-hover: #afa7ff;
+  --accent-rgb: 154, 144, 255;
+  --success: #71c89f;
+  --success-rgb: 113, 200, 159;
+  --danger: #ff8790;
+  --danger-rgb: 255, 135, 144;
+  --warning: #e5aa5e;
+  --glass-shadow: 0 12px 36px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --window-shadow: 0 34px 100px rgba(0, 0, 0, 0.58);
+  --control-glow: 0 0 0 1px rgba(187, 224, 241, 0.38), 0 0 16px rgba(94, 178, 216, 0.18), 0 0 28px rgba(105, 104, 221, 0.14);
+
+  --verse-panel: var(--panel);
+  --verse-panel-strong: var(--panel-strong);
+  --verse-card: var(--card);
+  --verse-raised: var(--panel-strong);
+  --verse-field: var(--field);
+  --verse-border: var(--line);
+  --verse-border-dark: var(--line-dark);
+  --verse-text: var(--text);
+  --verse-muted: var(--muted);
+  --verse-subtle: var(--soft);
+  --verse-accent: var(--accent);
+  --verse-accent-hover: var(--accent-hover);
+  --verse-accent-rgb: var(--accent-rgb);
+  --verse-success: var(--success);
+  --verse-success-rgb: var(--success-rgb);
+  --verse-danger: var(--danger);
+  --verse-danger-rgb: var(--danger-rgb);
+  --verse-warning: var(--warning);
+  --verse-ui-shadow: var(--glass-shadow);
+  --verse-window-shadow: var(--window-shadow);
+  --verse-control-glow: var(--control-glow);
+}
+
+body[data-platform="win32"] {
+  --page: #0e1017;
+  --frame: #0e1017;
+  --panel: #1a1f28;
+  --panel-strong: #232a36;
+  --popover-surface: #232a36;
+  --card: #1e242e;
+  --field: #12161d;
+}
+
+body[data-platform="win32"][data-theme="light"] {
+  --page: #eef2f6;
+  --frame: #eef2f6;
+  --panel: #dce4ec;
+  --panel-strong: #c8d4e0;
+  --popover-surface: #d7e1eb;
+  --card: #d4e0eb;
+  --field: #f0f5fa;
+}

@@ -1,0 +1,340 @@
+.glass-panel {
+  position: relative;
+  border: 1px solid var(--line);
+  background: linear-gradient(145deg, color-mix(in srgb, var(--panel) 92%, white 8%), color-mix(in srgb, var(--panel) 98%, transparent));
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transform: translateZ(0);
+}
+
+.glass-popover {
+  position: absolute;
+  border: 1px solid var(--line);
+  background: var(--popover-surface);
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.45), var(--glass-shadow);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+}
+
+/* Universal Proximity Border Spotlight Glow across ALL buttons, inputs, chips, cards & panels */
+button:not(.toast-close):not(.chip-remove-btn):not(.close-btn):not(.dialog-close):not(.modal-close),
+input:not([type="checkbox"]):not([type="radio"]),
+textarea,
+select,
+.glass-panel,
+.settings-row,
+.spotlight-card,
+.profile-card,
+.lead-card,
+.source-chip,
+.workflow-card,
+.log-card,
+.workspace-card {
+  position: relative;
+}
+
+button:not(.toast-close):not(.chip-remove-btn):not(.close-btn):not(.dialog-close):not(.modal-close)::after,
+input:not([type="checkbox"]):not([type="radio"])::after,
+textarea::after,
+select::after,
+.glass-panel::after,
+.settings-row::after,
+.spotlight-card::after,
+.profile-card::after,
+.lead-card::after,
+.source-chip::after,
+.workflow-card::after,
+.log-card::after,
+.workspace-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.2px;
+  /* Default/Dark Theme: Bright Metallic Slate Graphite Border Glow */
+  background: radial-gradient(
+    160px circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
+    rgba(226, 232, 240, 0.85) 0%,
+    rgba(148, 163, 184, 0.4) 45%,
+    transparent 80%
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: var(--spotlight-opacity, 0);
+  pointer-events: none;
+  transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 2;
+}
+
+/* Light Theme: Darker high-contrast slate graphite border glow for max visibility on white/light glass */
+body[data-theme="light"] button:not(.toast-close):not(.chip-remove-btn):not(.close-btn):not(.dialog-close):not(.modal-close)::after,
+body[data-theme="light"] input:not([type="checkbox"]):not([type="radio"])::after,
+body[data-theme="light"] textarea::after,
+body[data-theme="light"] select::after,
+body[data-theme="light"] .glass-panel::after,
+body[data-theme="light"] .settings-row::after,
+body[data-theme="light"] .spotlight-card::after,
+body[data-theme="light"] .profile-card::after,
+body[data-theme="light"] .lead-card::after,
+body[data-theme="light"] .source-chip::after,
+body[data-theme="light"] .workflow-card::after,
+body[data-theme="light"] .log-card::after,
+body[data-theme="light"] .workspace-card::after {
+  background: radial-gradient(
+    160px circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
+    rgba(30, 41, 59, 0.85) 0%,
+    rgba(71, 85, 105, 0.45) 45%,
+    transparent 80%
+  );
+}
+
+.toast-close::after,
+.chip-remove-btn::after,
+.close-btn::after,
+.dialog-close::after,
+.modal-close::after,
+.source-chip button::after,
+.outreach-message-chip button::after,
+.workspace-file-chip button::after,
+.side-navigation button:not(.is-active)::after,
+.side-settings:not(.is-active)::after {
+  display: none !important;
+  content: none !important;
+}
+
+.toast-close,
+.chip-remove-btn,
+.close-btn,
+.dialog-close,
+.modal-close,
+.source-chip button,
+.outreach-message-chip button,
+.workspace-file-chip button {
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+.glass-panel > * {
+  position: relative;
+  z-index: 1;
+}
+
+.soft-button,
+.icon-button,
+.run-button,
+.profile-button,
+.workspace-switcher button,
+.side-navigation button,
+.side-settings,
+.source-chip,
+.profile-segments button,
+.profile-menu-action,
+.activation-primary,
+.activation-secondary,
+.activation-link,
+.danger-button,
+.cloudverse-overflow-menu button {
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 180ms var(--ease), border-color 180ms var(--ease), box-shadow 180ms var(--ease), color 180ms var(--ease), filter 180ms var(--ease), transform 180ms var(--ease);
+}
+
+.soft-button:hover,
+.icon-button:hover,
+.run-button:hover,
+.profile-button:hover,
+.workspace-switcher button:hover,
+.side-navigation button.is-active:hover,
+.side-settings.is-active:hover,
+.source-chip:hover,
+.profile-segments button:hover,
+.profile-menu-action:hover,
+.activation-primary:hover,
+.activation-secondary:hover,
+.activation-link:hover,
+.danger-button:hover,
+.cloudverse-overflow-menu button:hover {
+  box-shadow: var(--control-glow);
+  filter: brightness(1.06);
+}
+
+.soft-button:active,
+.icon-button:active,
+.run-button:active,
+.profile-button:active,
+.workspace-switcher button:active,
+.side-navigation button:active,
+.side-settings:active,
+.source-chip:active,
+.profile-segments button:active,
+.profile-menu-action:active,
+.activation-primary:active,
+.activation-secondary:active,
+.activation-link:active,
+.danger-button:active,
+.cloudverse-overflow-menu button:active {
+  transform: scale(0.98);
+}
+
+.profile-menu-anchor {
+  position: relative;
+}
+
+.profile-menu {
+  position: absolute;
+  z-index: 30;
+  top: 46px;
+  right: 0;
+  width: 280px;
+  padding: 14px;
+  border-radius: 22px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-6px) scale(0.98);
+  transition: opacity 180ms var(--ease), transform 180ms var(--ease);
+}
+
+.profile-menu.is-open {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
+}
+
+.profile-menu-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 4px 13px;
+  border-bottom: 1px solid var(--line-dark);
+}
+
+.avatar-mini {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--field);
+}
+
+.profile-menu-user {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.profile-menu-user > span,
+.profile-menu-label {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.profile-menu-name {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+}
+
+.plan-badge {
+  min-height: 18px;
+  padding: 3px 7px 2px;
+  border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--line));
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.subscription-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  padding: 10px 11px;
+  border: 1px solid var(--line-dark);
+  border-radius: 13px;
+  background: var(--field);
+  font-size: 9px;
+}
+
+.subscription-summary span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+
+.subscription-summary i {
+  color: var(--success);
+  font-size: 13px;
+}
+
+.profile-menu-section {
+  display: grid;
+  gap: 7px;
+  padding-top: 12px;
+}
+
+.profile-segments {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line-dark);
+  border-radius: 13px;
+  background: var(--field);
+}
+
+.profile-segments button {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 32px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.profile-segments button.is-active {
+  background: color-mix(in srgb, var(--field) 88%, white 12%);
+  color: var(--text);
+  box-shadow: 0 6px 16px rgba(39, 52, 60, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+.profile-menu-action {
+  display: grid;
+  width: 100%;
+  min-height: 38px;
+  grid-template-columns: 18px minmax(0, 1fr) 14px;
+  align-items: center;
+  gap: 7px;
+  margin-top: 12px;
+  padding: 0 11px;
+  border-color: var(--line-dark);
+  border-radius: 13px;
+  background: var(--field);
+  color: var(--text);
+  font-size: 10px;
+  text-align: left;
+}
+
+.profile-menu-action i:first-child {
+  color: var(--accent);
+  font-size: 13px;
+}
+
+.profile-menu-action i:last-child {
+  color: var(--soft);
+  font-size: 11px;
+}

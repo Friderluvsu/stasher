@@ -1,0 +1,1 @@
+"""Stasher Core Module."""

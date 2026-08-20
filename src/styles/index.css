@@ -1,0 +1,7 @@
+@import "tailwindcss";
+@import "./tokens.css";
+@import "./base.css";
+@import "./surfaces.css";
+@import "./shell.css";
+@import "./workspace.css";
+@import "./transitions.css";

@@ -1,0 +1,36 @@
+name: Manual Telegram Upload
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag name to upload (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+jobs:
+  send_to_telegram:
+    name: Notify Telegram
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Telethon
+        run: pip install telethon requests
+
+      - name: Run Upload Script
+        run: python scripts/tg_upload.py
+        env:
+          TARGET_TAG: ${{ github.event.inputs.tag_name }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+          TELEGRAM_INVITE_LINK: ${{ secrets.TELEGRAM_INVITE_LINK }}
