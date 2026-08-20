@@ -21,6 +21,7 @@
   "build": {
     "appId": "com.frider.stasher",
     "productName": "Stasher",
+    "npmRebuild": false,
     "publish": [
       {
         "provider": "github",

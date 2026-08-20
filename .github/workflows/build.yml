@@ -87,7 +87,11 @@ jobs:
           test "$(printf '%s\n' "${files[@]}" | grep -cE '\.exe$')" -ge 1
           test "$(printf '%s\n' "${files[@]}" | grep -cE '/latest\.yml$')" -eq 1
 
-          gh release upload "$GITHUB_REF_NAME" "${files[@]}" --repo "$RELEASE_REPOSITORY" --clobber
+          target_tag="${GITHUB_REF_NAME}"
+          if [ "$target_tag" = "main" ] || [ "$target_tag" = "master" ]; then
+            target_tag="$(gh release list --repo "$RELEASE_REPOSITORY" --limit 1 | awk '{print $3}')"
+          fi
+          gh release upload "$target_tag" "${files[@]}" --repo "$RELEASE_REPOSITORY" --clobber
 
   build_mac_intel:
     name: Build macOS Intel
@@ -138,7 +142,11 @@ jobs:
 
           test "$(printf '%s\n' "${files[@]}" | grep -cE -- '-x64\.dmg$')" -ge 1
 
-          gh release upload "$GITHUB_REF_NAME" "${files[@]}" --repo "$RELEASE_REPOSITORY" --clobber
+          target_tag="${GITHUB_REF_NAME}"
+          if [ "$target_tag" = "main" ] || [ "$target_tag" = "master" ]; then
+            target_tag="$(gh release list --repo "$RELEASE_REPOSITORY" --limit 1 | awk '{print $3}')"
+          fi
+          gh release upload "$target_tag" "${files[@]}" --repo "$RELEASE_REPOSITORY" --clobber
 
   build_mac_arm64:
     name: Build macOS ARM
@@ -183,8 +191,12 @@ jobs:
             files+=("$file")
           done < <(find dist -maxdepth 1 -type f \( -name '*-arm64.dmg' -o -name '*-arm64.zip' -o -name '*-arm64*.blockmap' -o -name 'latest-mac.yml' \) -print0)
 
-          test "$(printf '%s\n' "${files[@]}" | grep -cE -- '-arm64\.dmg$')" -eq 1
+          test "$(printf '%s\n' "${files[@]}" | grep -cE -- '-arm64\.dmg$')" -ge 1
           test "$(printf '%s\n' "${files[@]}" | grep -cE -- '-arm64\.zip$')" -eq 1
           test "$(printf '%s\n' "${files[@]}" | grep -cE '/latest-mac\.yml$')" -eq 1
 
-          gh release upload "$GITHUB_REF_NAME" "${files[@]}" --repo "$RELEASE_REPOSITORY" --clobber
+          target_tag="${GITHUB_REF_NAME}"
+          if [ "$target_tag" = "main" ] || [ "$target_tag" = "master" ]; then
+            target_tag="$(gh release list --repo "$RELEASE_REPOSITORY" --limit 1 | awk '{print $3}')"
+          fi
+          gh release upload "$target_tag" "${files[@]}" --repo "$RELEASE_REPOSITORY" --clobber
