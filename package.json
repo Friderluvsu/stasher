@@ -1,6 +1,6 @@
 {
   "name": "stasher",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Offline FL Studio project vault, MIDI/sample extractor, and pattern organizer with DAW drag-and-drop",
   "main": "electron/main.cjs",
   "type": "module",
