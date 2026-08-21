@@ -35,6 +35,7 @@ export interface SoundItem {
   tag: string;
   file_exists: number;
   file_size: number;
+  root_note?: string | null;
   project_title: string;
   project_file_name: string;
   project_tempo: number;
@@ -155,6 +156,26 @@ export const api = {
 
   async seedDemoData() {
     const res = await fetch(`${API_BASE}/demo-seed`, { method: 'POST' });
+    return res.json();
+  },
+
+  async updateSound(id: number, name: string, tag: string) {
+    const res = await fetch(`${API_BASE}/sounds/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, tag })
+    });
+    if (!res.ok) throw new Error('Failed to update sound');
+    return res.json();
+  },
+
+  async updatePattern(id: number, name: string, tag: string) {
+    const res = await fetch(`${API_BASE}/patterns/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, tag })
+    });
+    if (!res.ok) throw new Error('Failed to update pattern');
     return res.json();
   },
 

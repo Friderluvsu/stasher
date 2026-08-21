@@ -4,7 +4,8 @@ import mido
 import io
 from backend.core.classifier import classify_tag
 from backend.core.midi_generator import create_midi_bytes
-from backend.core.database import init_db, save_project, query_patterns, get_pattern_midi
+from backend.core.database import init_db, save_project, query_patterns, query_sounds, get_pattern_midi
+from backend.core.sample_resolver import resolve_sample_path
 
 class TestStasherPipeline(unittest.TestCase):
     def setUp(self):
@@ -18,6 +19,15 @@ class TestStasherPipeline(unittest.TestCase):
         self.assertEqual(classify_tag("Clap", None), "Clap")
         self.assertEqual(classify_tag("LA Custom Piano", None), "Chords")
         self.assertEqual(classify_tag("Guitar Lead", None), "Lead")
+        
+        # Russian and VST synths
+        self.assertEqual(classify_tag("Кик плотный", None), "Kick")
+        self.assertEqual(classify_tag("Снейр 808", None), "Snare")
+        self.assertEqual(classify_tag("Хэты ролл", None), "Hi-Hat")
+        self.assertEqual(classify_tag("Nexus #6", None), "Melody")
+        self.assertEqual(classify_tag("Serum Lead", None), "Lead")
+        self.assertEqual(classify_tag("Keyscape Grand", None), "Chords")
+        self.assertEqual(classify_tag("Xpand!2 #2", None), "Melody")
 
     def test_classifier_note_heuristics(self):
         # High repetitive notes -> Hi-Hat
@@ -49,6 +59,13 @@ class TestStasherPipeline(unittest.TestCase):
         mid = mido.MidiFile(file=io.BytesIO(midi_bytes))
         self.assertEqual(len(mid.tracks), 1)
 
+    def test_sample_resolver(self):
+        # Resolving a known sample from the user library
+        res = resolve_sample_path("D:\\FLProjects\\Сборник сэмплов\\! Frider Beats !\\Drums\\1.808\\4CS - 808 WHEAZZY_2.wav")
+        if res:
+            self.assertTrue(os.path.exists(res))
+            self.assertTrue(res.endswith(".wav"))
+
     def test_database_and_fts_search(self):
         test_project = {
             "file_path": "/Test/Projects/Test_Trap_Project.flp",
@@ -59,12 +76,16 @@ class TestStasherPipeline(unittest.TestCase):
             "channel_count": 2,
             "pattern_count": 2,
             "file_size": 1024,
+            "channels": [
+                {"index": 0, "name": "4CS - 808 WHEAZZY_2", "sample_path": "D:\\FLProjects\\Drums\\1.808\\4CS - 808 WHEAZZY_2.wav", "generator": "Sampler"},
+                {"index": 1, "name": "Nexus #6", "sample_path": None, "generator": "Nexus"}
+            ],
             "patterns": [
                 {
                     "pattern_index": 0,
                     "pattern_name": "Spinz 808 Heavy",
                     "channel_index": 0,
-                    "channel_name": "Spinz 808",
+                    "channel_name": "4CS - 808 WHEAZZY_2",
                     "sample_path": "/Test/808.wav",
                     "tag": "808",
                     "bars": 4,
@@ -84,6 +105,10 @@ class TestStasherPipeline(unittest.TestCase):
         # Query by tag
         res_tag = query_patterns(tag="808")
         self.assertTrue(any(p["pattern_name"] == "Spinz 808 Heavy" for p in res_tag["items"]))
+
+        # Query sounds
+        res_sounds = query_sounds(tag="808")
+        self.assertTrue(len(res_sounds["items"]) > 0)
 
         # Query by FTS5 full text search
         res_search = query_patterns(search="Spinz")

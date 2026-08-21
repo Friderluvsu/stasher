@@ -4,7 +4,16 @@ import { audioEngine } from '../services/audioEngine';
 
 export type WorkspaceTab = 'midi' | 'sounds' | 'kit';
 
+
+export interface Kit {
+  id: string;
+  name: string;
+  sounds: SoundItem[];
+  patterns: PatternItem[];
+}
+
 interface VaultState {
+
   // Navigation
   activeTab: WorkspaceTab;
   setActiveTab: (tab: WorkspaceTab) => void;
@@ -37,16 +46,22 @@ interface VaultState {
   masterTempo: number;
 
   // Custom Sound Kit Builder
-  kitName: string;
-  kitSounds: SoundItem[];
-  kitPatterns: PatternItem[];
-  setKitName: (name: string) => void;
-  toggleKitSound: (sound: SoundItem) => void;
-  toggleKitPattern: (pattern: PatternItem) => void;
-  removeKitSound: (soundId: number) => void;
-  removeKitPattern: (patternId: number) => void;
-  clearKit: () => void;
-  exportKit: () => Promise<void>;
+  kits: Kit[];
+  activeKitId: string;
+  createKit: (name: string) => string;
+  setActiveKit: (id: string) => void;
+  deleteKit: (id: string) => void;
+  setKitName: (id: string, name: string) => void;
+  toggleKitSound: (sound: SoundItem, kitId?: string) => void;
+  toggleKitPattern: (pattern: PatternItem, kitId?: string) => void;
+  removeKitSound: (soundId: number, kitId?: string) => void;
+  removeKitPattern: (patternId: number, kitId?: string) => void;
+  clearKit: (kitId?: string) => void;
+  exportKit: (kitId?: string) => Promise<void>;
+
+  // Item Updates
+  updateItemInStore: (type: 'sound' | 'pattern', id: number, name: string, tag: string) => void;
+  updateItemTag: (type: 'sound' | 'pattern', id: number, tag: string) => Promise<void>;
 
   // Scanning Modal & Progress
   isScanning: boolean;
@@ -115,60 +130,92 @@ export const useVaultStore = create<VaultState>((set, get) => {
 
     masterTempo: 140,
 
-    kitName: 'My_StashSound_Kit',
-    kitSounds: [],
-    kitPatterns: [],
 
-    setKitName: (name) => set({ kitName: name }),
+    kits: [{ id: 'default', name: 'My_StashSound_Kit', sounds: [], patterns: [] }],
+    activeKitId: 'default',
 
-    toggleKitSound: (sound) => {
-      const { kitSounds } = get();
-      const exists = kitSounds.some((s) => s.id === sound.id);
-      if (exists) {
-        set({ kitSounds: kitSounds.filter((s) => s.id !== sound.id) });
-      } else {
-        set({ kitSounds: [...kitSounds, sound] });
-      }
+    createKit: (name) => {
+      const id = Date.now().toString();
+      set({ kits: [...get().kits, { id, name, sounds: [], patterns: [] }], activeKitId: id });
+      return id;
+    },
+    setActiveKit: (id) => set({ activeKitId: id }),
+    deleteKit: (id) => {
+      const { kits, activeKitId } = get();
+      if (kits.length <= 1) return;
+      const newKits = kits.filter(k => k.id !== id);
+      set({ kits: newKits, activeKitId: activeKitId === id ? newKits[0].id : activeKitId });
+    },
+    setKitName: (id, name) => {
+      set({
+        kits: get().kits.map(k => k.id === id ? { ...k, name } : k)
+      });
     },
 
-    toggleKitPattern: (pattern) => {
-      const { kitPatterns } = get();
-      const exists = kitPatterns.some((p) => p.id === pattern.id);
-      if (exists) {
-        set({ kitPatterns: kitPatterns.filter((p) => p.id !== pattern.id) });
-      } else {
-        set({ kitPatterns: [...kitPatterns, pattern] });
-      }
+    toggleKitSound: (sound, kitId) => {
+      const targetId = kitId || get().activeKitId;
+      set({
+        kits: get().kits.map(k => {
+          if (k.id !== targetId) return k;
+          const exists = k.sounds.some(s => s.id === sound.id);
+          return {
+            ...k,
+            sounds: exists ? k.sounds.filter(s => s.id !== sound.id) : [...k.sounds, sound]
+          };
+        })
+      });
     },
 
-    removeKitSound: (soundId) => {
-      const { kitSounds } = get();
-      set({ kitSounds: kitSounds.filter((s) => s.id !== soundId) });
+    toggleKitPattern: (pattern, kitId) => {
+      const targetId = kitId || get().activeKitId;
+      set({
+        kits: get().kits.map(k => {
+          if (k.id !== targetId) return k;
+          const exists = k.patterns.some(p => p.id === pattern.id);
+          return {
+            ...k,
+            patterns: exists ? k.patterns.filter(p => p.id !== pattern.id) : [...k.patterns, pattern]
+          };
+        })
+      });
     },
 
-    removeKitPattern: (patternId) => {
-      const { kitPatterns } = get();
-      set({ kitPatterns: kitPatterns.filter((p) => p.id !== patternId) });
+    removeKitSound: (soundId, kitId) => {
+      const targetId = kitId || get().activeKitId;
+      set({
+        kits: get().kits.map(k => k.id === targetId ? { ...k, sounds: k.sounds.filter(s => s.id !== soundId) } : k)
+      });
     },
 
-    clearKit: () => {
-      set({ kitSounds: [], kitPatterns: [] });
+    removeKitPattern: (patternId, kitId) => {
+      const targetId = kitId || get().activeKitId;
+      set({
+        kits: get().kits.map(k => k.id === targetId ? { ...k, patterns: k.patterns.filter(p => p.id !== patternId) } : k)
+      });
     },
 
-    exportKit: async () => {
-      const { kitName, kitSounds, kitPatterns } = get();
+    clearKit: (kitId) => {
+      const targetId = kitId || get().activeKitId;
+      set({
+        kits: get().kits.map(k => k.id === targetId ? { ...k, sounds: [], patterns: [] } : k)
+      });
+    },
+
+    exportKit: async (kitId) => {
+      const targetId = kitId || get().activeKitId;
+      const kit = get().kits.find(k => k.id === targetId);
+      if (!kit) return;
       try {
         const blob = await api.exportKit({
-          kit_name: kitName || 'My_StashSound_Kit',
-          sound_ids: kitSounds.map((s) => s.id),
-          pattern_ids: kitPatterns.map((p) => p.id)
+          kit_name: kit.name || 'My_StashSound_Kit',
+          sound_ids: kit.sounds.map(s => s.id),
+          pattern_ids: kit.patterns.map(p => p.id)
         });
 
-        // Trigger browser / Electron download
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${(kitName || 'My_StashSound_Kit').replace(/[^a-zA-Z0-9_-]/g, '_')}.zip`;
+        a.download = `${(kit.name || 'My_StashSound_Kit').replace(/[^a-zA-Z0-9_-]/g, '_')}.zip`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -177,6 +224,61 @@ export const useVaultStore = create<VaultState>((set, get) => {
         console.error('Kit export error:', err);
       }
     },
+
+    updateItemInStore: (type, id, name, tag) => {
+      if (type === 'sound') {
+        set({
+          sounds: get().sounds.map(s => s.id === id ? { ...s, sample_name: name, tag } : s),
+          kits: get().kits.map(k => ({
+            ...k,
+            sounds: k.sounds.map(s => s.id === id ? { ...s, sample_name: name, tag } : s)
+          }))
+        });
+      } else {
+        set({
+          patterns: get().patterns.map(p => p.id === id ? { ...p, pattern_name: name, tag } : p),
+          kits: get().kits.map(k => ({
+            ...k,
+            patterns: k.patterns.map(p => p.id === id ? { ...p, pattern_name: name, tag } : p)
+          }))
+        });
+      }
+    },
+
+    updateItemTag: async (type, id, tag) => {
+      if (type === 'sound') {
+        const item = get().sounds.find(s => s.id === id);
+        const currentName = item?.sample_name || item?.channel_name || 'Sound';
+        set({
+          sounds: get().sounds.map(s => s.id === id ? { ...s, tag } : s),
+          kits: get().kits.map(k => ({
+            ...k,
+            sounds: k.sounds.map(s => s.id === id ? { ...s, tag } : s)
+          }))
+        });
+        try {
+          await api.updateSound(id, currentName, tag);
+        } catch (err) {
+          console.error('Failed to update sound tag on server:', err);
+        }
+      } else {
+        const item = get().patterns.find(p => p.id === id);
+        const currentName = item?.pattern_name || 'Pattern';
+        set({
+          patterns: get().patterns.map(p => p.id === id ? { ...p, tag } : p),
+          kits: get().kits.map(k => ({
+            ...k,
+            patterns: k.patterns.map(p => p.id === id ? { ...p, tag } : p)
+          }))
+        });
+        try {
+          await api.updatePattern(id, currentName, tag);
+        } catch (err) {
+          console.error('Failed to update pattern tag on server:', err);
+        }
+      }
+    },
+
 
     isScanning: false,
     scanProgress: {

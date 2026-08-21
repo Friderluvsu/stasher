@@ -1,14 +1,26 @@
 name: Build and Release All Platforms
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  RELEASE_REPOSITORY: ${{ github.repository }}
-
 on:
   push:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Platform to build'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - windows
+          - macos-arm64
+          - macos-intel
+      draft:
+        description: 'Publish as draft release'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -18,195 +30,99 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  prepare_release:
-    name: Prepare GitHub Release
-    runs-on: ubuntu-latest
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: windows
+            os: windows-latest
+            name: Windows x64 (.exe)
+            arch: x64
+            target: win
+          - id: macos-arm64
+            os: macos-latest
+            name: macOS Apple Silicon (.dmg)
+            arch: arm64
+            target: mac
+          - id: macos-intel
+            os: macos-15-intel
+            name: macOS Intel (.dmg)
+            arch: x64
+            target: mac
+
     steps:
-      - name: Create release once
-        env:
-          GH_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
+      - name: Check selected platform
+        id: filter
+        shell: bash
         run: |
-          test -n "$GH_TOKEN"
-          TAG_NAME="${GITHUB_REF_NAME}"
-          if [ "$TAG_NAME" = "main" ] || [ "$TAG_NAME" = "master" ]; then
-            TAG_NAME="v$(node -p "require('./package.json').version" 2>/dev/null || echo "1.0.0")"
-          fi
-          if gh release view "$TAG_NAME" --repo "$RELEASE_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $TAG_NAME already exists."
+          selected="${{ github.event.inputs.platform || 'all' }}"
+          if [ "$selected" = "all" ] || [ "$selected" = "${{ matrix.id }}" ]; then
+            echo "run_build=true" >> $GITHUB_OUTPUT
           else
-            gh release create "$TAG_NAME" \
-              --repo "$RELEASE_REPOSITORY" \
-              --title "Stasher $TAG_NAME" \
-              --generate-notes \
-              --draft
+            echo "run_build=false" >> $GITHUB_OUTPUT
           fi
 
-  build_windows_x64:
-    name: Build Windows x64
-    needs: prepare_release
-    runs-on: windows-latest
-    steps:
       - uses: actions/checkout@v4
+        if: steps.filter.outputs.run_build == 'true'
 
       - uses: actions/setup-node@v4
+        if: steps.filter.outputs.run_build == 'true'
         with:
           node-version: 22
           cache: 'npm'
-          architecture: 'x64'
 
       - uses: actions/setup-python@v5
+        if: steps.filter.outputs.run_build == 'true'
         with:
           python-version: '3.10'
-          architecture: 'x64'
+          cache: 'pip'
 
       - name: Install Python dependencies
+        if: steps.filter.outputs.run_build == 'true'
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt pyinstaller
 
       - name: Install Node dependencies
-        run: npm install
+        if: steps.filter.outputs.run_build == 'true'
+        run: npm ci || npm install
 
       - name: Build Python Backend
+        if: steps.filter.outputs.run_build == 'true'
         run: npm run build:backend
 
-      - name: Build Windows
-        run: npm run release:win
-        env:
-          GH_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
-
-      - name: Upload verified Windows assets
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
+      - name: Build Desktop Application (${{ matrix.target }} - ${{ matrix.arch }})
+        if: steps.filter.outputs.run_build == 'true'
         run: |
-          test -n "$GH_TOKEN"
-          mapfile -d '' files < <(find dist -maxdepth 1 -type f \( -name '*.exe' -o -name '*.exe.blockmap' -o -name 'latest.yml' \) -print0)
-          installer_name="$(sed -n 's/^path: //p' dist/latest.yml | head -n 1)"
-          test -n "$installer_name"
-          test -f "dist/$installer_name"
-          test "$(printf '%s\n' "${files[@]}" | grep -cE '\.exe$')" -ge 1
-          test "$(printf '%s\n' "${files[@]}" | grep -cE '/latest\.yml$')" -eq 1
-          gh release upload "$GITHUB_REF_NAME" "${files[@]}" --repo "$RELEASE_REPOSITORY" --clobber
+          npm run build:frontend
+          npx electron-builder --${{ matrix.target }} --${{ matrix.arch }} --publish never
+        env:
+          GH_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
 
-  build_mac_intel:
-    name: Build macOS Intel
-    needs: prepare_release
-    runs-on: macos-15-intel
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      - name: Upload binaries to GitHub Release
+        if: steps.filter.outputs.run_build == 'true'
+        uses: softprops/action-gh-release@v2
         with:
-          node-version: 22
-          cache: 'npm'
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
-      - name: Install Python dependencies
-        run: |
-          python3 -m pip install --upgrade pip
-          pip install -r backend/requirements.txt pyinstaller
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Build Python Backend
-        run: npm run build:backend
-
-      - name: Build Mac Intel
-        run: npm run build:frontend && npx electron-builder --mac --x64 --publish never
+          draft: ${{ github.event.inputs.draft || false }}
+          generate_release_notes: true
+          files: |
+            dist/*.exe
+            dist/*.exe.blockmap
+            dist/*.dmg
+            dist/*.dmg.blockmap
+            dist/*.zip
+            dist/*.zip.blockmap
+            dist/latest.yml
+            dist/latest-mac.yml
         env:
-          GH_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
 
-      - name: Upload verified Mac Intel assets
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
-        run: |
-          test -n "$GH_TOKEN"
-          files=()
-          while IFS= read -r -d '' file; do files+=("$file"); done < <(find dist -maxdepth 1 -type f \( -name '*-x64.dmg' -o -name '*-x64.zip' -o -name '*-x64*.blockmap' \) -print0)
-          test "$(printf '%s\n' "${files[@]}" | grep -cE -- '-x64\.dmg$')" -ge 1
-          test "$(printf '%s\n' "${files[@]}" | grep -cE -- '-x64\.zip$')" -ge 1
-          gh release upload "$GITHUB_REF_NAME" "${files[@]}" --repo "$RELEASE_REPOSITORY" --clobber
-
-
-  build_mac_arm64:
-    name: Build macOS ARM
-    needs: prepare_release
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: 'npm'
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
-      - name: Install Python dependencies
-        run: |
-          python3 -m pip install --upgrade pip
-          pip install -r backend/requirements.txt pyinstaller
-
-      - run: npm install
-
-      - name: Build Python Backend
-        run: npm run build:backend
-
-      - name: Build Mac ARM64
-        run: npm run build:frontend && npx electron-builder --mac --arm64 --publish never
-        env:
-          GH_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
-
-      - name: Upload verified Mac ARM64 assets
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
-        run: |
-          test -n "$GH_TOKEN"
-          files=()
-          while IFS= read -r -d '' file; do files+=("$file"); done < <(find dist -maxdepth 1 -type f \( -name '*-arm64.dmg' -o -name '*-arm64.zip' -o -name '*-arm64*.blockmap' -o -name 'latest-mac.yml' \) -print0)
-          test "$(printf '%s\n' "${files[@]}" | grep -cE -- '-arm64\.dmg$')" -eq 1
-          test "$(printf '%s\n' "${files[@]}" | grep -cE -- '-arm64\.zip$')" -eq 1
-          test "$(printf '%s\n' "${files[@]}" | grep -cE '/latest-mac\.yml$')" -eq 1
-          gh release upload "$GITHUB_REF_NAME" "${files[@]}" --repo "$RELEASE_REPOSITORY" --clobber
-
-  publish_release:
-    name: Publish GitHub Release
-    needs: [build_windows_x64, build_mac_intel, build_mac_arm64]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Publish prepared release
-        env:
-          GH_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
-        run: |
-          test -n "$GH_TOKEN"
-          release_json="$(gh release view "$GITHUB_REF_NAME" --repo "$RELEASE_REPOSITORY" --json isDraft,assets)"
-          test "$(jq -r '.isDraft' <<<"$release_json")" = "true"
-          asset_names="$(jq -r '.assets[].name' <<<"$release_json")"
-          release_metadata_dir="$(mktemp -d)"
-          trap 'rm -rf "$release_metadata_dir"' EXIT
-          gh release download "$GITHUB_REF_NAME" --repo "$RELEASE_REPOSITORY" --pattern latest.yml --dir "$release_metadata_dir"
-          installer_name="$(sed -n 's/^path: //p' "$release_metadata_dir/latest.yml" | head -n 1)"
-          test -n "$installer_name"
-          test "$(grep -cFx "$installer_name" <<<"$asset_names")" -eq 1
-          test "$(grep -cE '\.exe$' <<<"$asset_names")" -ge 1
-          test "$(grep -cE -- '-x64\.dmg$' <<<"$asset_names")" -ge 1
-          test "$(grep -cE -- '-arm64\.dmg$' <<<"$asset_names")" -ge 1
-          test "$(grep -cE '^latest\.yml$' <<<"$asset_names")" -eq 1
-          test "$(grep -cE '^latest-mac\.yml$' <<<"$asset_names")" -eq 1
-          gh release edit "$GITHUB_REF_NAME" --repo "$RELEASE_REPOSITORY" --draft=false --latest
-
-  send_to_telegram:
+  notify_telegram:
     name: Notify Telegram
-    needs: publish_release
+    needs: build
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -224,7 +140,7 @@ jobs:
         run: python scripts/tg_upload.py
         env:
           GITHUB_REF_NAME: ${{ github.ref_name }}
-          RELEASE_REPOSITORY: ${{ env.RELEASE_REPOSITORY }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
           GH_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
           TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
           TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}

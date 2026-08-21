@@ -657,6 +657,30 @@ def seed_demo_data():
 def health():
     return {"status": "ok", "app": "Stasher", "version": "1.0.0"}
 
+class UpdateItemRequest(BaseModel):
+    name: str
+    tag: str
+
+@app.patch("/api/sounds/{sound_id}")
+def update_sound_endpoint(sound_id: int, req: UpdateItemRequest):
+    try:
+        from backend.core.database import update_sound
+        update_sound(sound_id, req.name, req.tag)
+        return {"success": True}
+    except Exception as e:
+        logger.error(f"Error updating sound {sound_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.patch("/api/patterns/{pattern_id}")
+def update_pattern_endpoint(pattern_id: int, req: UpdateItemRequest):
+    try:
+        from backend.core.database import update_pattern
+        update_pattern(pattern_id, req.name, req.tag)
+        return {"success": True}
+    except Exception as e:
+        logger.error(f"Error updating pattern {pattern_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 if __name__ == "__main__":
     import multiprocessing
     multiprocessing.freeze_support()
@@ -665,5 +689,3 @@ if __name__ == "__main__":
     config = uvicorn.Config(app, host="127.0.0.1", port=8765, log_level="info", loop="asyncio")
     server = uvicorn.Server(config)
     server.run()
-
-

@@ -72,9 +72,16 @@ def init_db():
         tag TEXT,
         file_exists INTEGER,
         file_size INTEGER,
+        root_note TEXT,
         FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
     )
     """)
+
+    # Safe migration for existing databases
+    try:
+        cursor.execute("ALTER TABLE sounds ADD COLUMN root_note TEXT")
+    except Exception:
+        pass
 
     # 4. Stacks table
     cursor.execute("""
@@ -202,19 +209,60 @@ def save_project(project_data: Dict[str, Any]) -> int:
 
     # Insert sounds (extracted channel samples)
     try:
-        from backend.core.classifier import classify_tag
+        from backend.core.classifier import classify_tag, analyze_sample
+        from backend.core.sample_resolver import resolve_sample_path
     except Exception:
         try:
-            from core.classifier import classify_tag
+            from core.classifier import classify_tag, analyze_sample
+            from core.sample_resolver import resolve_sample_path
         except Exception:
-            from classifier import classify_tag
-
+            from classifier import classify_tag, analyze_sample
+            from sample_resolver import resolve_sample_path
 
     for ch in project_data.get("channels", []):
+        raw_path = ch.get("raw_sample_path") or ch.get("sample_path")
         sample_path = ch.get("sample_path")
         ch_name = ch.get("name", "Channel")
-        sample_name = os.path.basename(sample_path) if sample_path else ch_name
-        tag = classify_tag(ch_name, sample_name)
+        generator = ch.get("generator", "Sampler")
+        
+        # If it's a VST synth without an audio file, don't pollute the drum/sound vault
+        if not raw_path and not sample_path and generator not in ["Sampler", "AudioClip", "Fruity Slicer", "Slicex"]:
+            continue
+
+        if raw_path or sample_path:
+            resolved = resolve_sample_path(sample_path or raw_path, project_data.get("file_path"))
+            if resolved:
+                sample_path = resolved
+
+        # Clean display sample name (filename without full directory path)
+        if sample_path:
+            sample_name = os.path.basename(sample_path.replace("\\", "/"))
+        elif raw_path:
+            sample_name = os.path.basename(raw_path.replace("\\", "/"))
+        else:
+            sample_name = ch_name
+
+        # Perform comprehensive DSP & text analysis
+        analysis = analyze_sample(
+            sample_file_path=sample_path,
+            channel_name=ch_name,
+            sample_name=raw_path or sample_path
+        )
+        tag = analysis.get("tag", "Other")
+        root_note = analysis.get("root_note")
+
+        # If offline/unscanned 808/Bass, derive root note from the channel's pattern notes
+        if not root_note and tag in ["808", "Bass"]:
+            for pat in project_data.get("patterns", []):
+                if pat.get("channel_index") == ch.get("index"):
+                    notes = pat.get("notes", [])
+                    if notes:
+                        pitches = [n.get("pitch", 60) for n in notes]
+                        min_p = min(pitches)
+                        note_names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+                        octave = (min_p // 12) - 1
+                        root_note = f"{note_names[min_p % 12]}{octave}"
+                        break
         
         file_exists = 0
         file_size = 0
@@ -229,8 +277,8 @@ def save_project(project_data: Dict[str, Any]) -> int:
 
         cursor.execute("""
         INSERT INTO sounds (
-            project_id, channel_index, channel_name, sample_name, sample_path, tag, file_exists, file_size
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            project_id, channel_index, channel_name, sample_name, sample_path, tag, file_exists, file_size, root_note
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING id
         """, (
             project_id,
@@ -240,7 +288,8 @@ def save_project(project_data: Dict[str, Any]) -> int:
             sample_path,
             tag,
             file_exists,
-            file_size
+            file_size,
+            root_note
         ))
 
         sound_id = cursor.fetchone()["id"]
@@ -354,7 +403,7 @@ def query_sounds(
     cursor = conn.cursor()
 
     params: List[Any] = []
-    where_clauses: List[str] = ["s.file_exists = 1"]
+    where_clauses: List[str] = []
 
     if search and search.strip():
         where_clauses.append("s.id IN (SELECT sound_id FROM fts_sounds WHERE fts_sounds MATCH ?)")
@@ -379,12 +428,12 @@ def query_sounds(
     select_sql = f"""
     SELECT 
         s.id, s.project_id, s.channel_index, s.channel_name,
-        s.sample_name, s.sample_path, s.tag, s.file_exists, s.file_size,
+        s.sample_name, s.sample_path, s.tag, s.file_exists, s.file_size, s.root_note,
         pr.title as project_title, pr.file_name as project_file_name, pr.tempo as project_tempo
     FROM sounds s
     JOIN projects pr ON s.project_id = pr.id
     {where_sql}
-    ORDER BY s.id DESC
+    ORDER BY s.file_exists DESC, s.id DESC
     LIMIT ? OFFSET ?
     """
     cursor.execute(select_sql, params + [limit, offset])
@@ -523,3 +572,17 @@ def delete_project(project_id: int):
     cursor.execute("DELETE FROM projects WHERE id = ?", (project_id,))
     conn.commit()
     conn.close()
+
+def update_sound(sound_id: int, name: str, tag: str):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE sounds SET sample_name = ?, tag = ? WHERE id = ?", (name, tag, sound_id))
+    cursor.execute("UPDATE fts_sounds SET sample_name = ?, tag = ? WHERE sound_id = ?", (name, tag, sound_id))
+    conn.commit()
+
+def update_pattern(pattern_id: int, name: str, tag: str):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE patterns SET pattern_name = ?, tag = ? WHERE id = ?", (name, tag, pattern_id))
+    cursor.execute("UPDATE fts_patterns SET pattern_name = ?, tag = ? WHERE pattern_id = ?", (name, tag, pattern_id))
+    conn.commit()

@@ -371,17 +371,7 @@ export default function App() {
                             : 'Drag & drop your FL Studio projects to extract all 808s, kicks, snares, and drum samples.'}
                         </div>
                       </div>
-                      <button
-                        className="soft-button"
-                        onClick={async () => {
-                          await seedDemoData();
-                          notify.success(isRu ? 'Демо-семплы загружены' : 'Demo samples loaded', 'Stasher');
-                        }}
-                        type="button"
-                      >
-                        <i className="ti ti-sparkles" style={{ color: 'var(--accent)' }} aria-hidden="true" />
-                        <span>{isRu ? 'Загрузить демо-семплы' : 'Load Sample Packs'}</span>
-                      </button>
+                      
                     </div>
                   ) : (
                     sounds.map((sound) => (
@@ -444,17 +434,7 @@ export default function App() {
                             : 'Drag & drop your FL Studio project files (.flp) to extract every melody, chord progression, and 808 roll.'}
                         </div>
                       </div>
-                      <button
-                        className="soft-button"
-                        onClick={async () => {
-                          await seedDemoData();
-                          notify.success(isRu ? 'Демо-паттерны загружены' : 'Demo patterns loaded', 'Stasher');
-                        }}
-                        type="button"
-                      >
-                        <i className="ti ti-sparkles" style={{ color: 'var(--accent)' }} aria-hidden="true" />
-                        <span>{isRu ? 'Загрузить демо-паттерны' : 'Load Sample FLP Packs'}</span>
-                      </button>
+                      
                     </div>
                   ) : (
                     patterns.map((pattern) => (

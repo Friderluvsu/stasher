@@ -19,13 +19,16 @@ except Exception as patch_err:
 try:
     from backend.core.classifier import classify_tag
     from backend.core.midi_generator import create_midi_bytes
+    from backend.core.sample_resolver import resolve_sample_path
 except Exception:
     try:
         from core.classifier import classify_tag
         from core.midi_generator import create_midi_bytes
+        from core.sample_resolver import resolve_sample_path
     except Exception:
         from classifier import classify_tag
         from midi_generator import create_midi_bytes
+        from sample_resolver import resolve_sample_path
 
 
 logger = logging.getLogger(__name__)
@@ -81,7 +84,7 @@ def safe_int(val: Any, default: int = 0) -> int:
 def parse_flp_project(flp_path: str) -> Optional[Dict[str, Any]]:
     """
     Parses an FL Studio project file (.flp) and extracts all channels,
-    patterns, notes, and metadata.
+    patterns, notes, and metadata with intelligent channel mapping and sample resolution.
     """
     flp_path = os.path.expanduser(os.path.abspath(flp_path))
     if not os.path.exists(flp_path):
@@ -116,12 +119,13 @@ def parse_flp_project(flp_path: str) -> Optional[Dict[str, Any]]:
             ppq = int(project.misc.ppq or 96)
 
         if hasattr(project, "title") and project.title:
-            project_title = str(project.title)
+            t_str = str(project.title).strip()
+            if t_str:
+                project_title = t_str
     except Exception as e:
         logger.debug(f"Metadata extract warning: {e}")
 
-    # 2. Extract Channels
-    # Use integer IDs and object id() as dict keys to avoid unhashable model errors
+    # 2. Extract Channels with Bulletproof IID / Index mapping
     channels_map: Dict[Any, Dict[str, Any]] = {}
     channels_list: List[Dict[str, Any]] = []
     
@@ -134,46 +138,69 @@ def parse_flp_project(flp_path: str) -> Optional[Dict[str, Any]]:
                 f"Channel {idx + 1}"
             )
             
-            sample_path = None
-            for attr in ["sample", "sample_path", "filename", "filepath"]:
+            raw_sample_path = None
+            for attr in ["sample_path", "sample", "filename", "filepath"]:
                 if hasattr(ch, attr):
                     val = getattr(ch, attr)
                     if val and isinstance(val, (str, os.PathLike)):
-                        sample_path = str(val)
+                        raw_sample_path = str(val)
                         break
 
-            generator = getattr(ch, "internal_name", None) or getattr(ch, "generator_name", None) or "Sampler"
+            # Resolve sample path against local file system
+            resolved_sample_path = resolve_sample_path(raw_sample_path, flp_path) if raw_sample_path else None
+
+            generator = getattr(ch, "internal_name", None) or getattr(ch, "generator_name", None) or getattr(ch, "plugin_name", None)
+            if not generator or generator == "None":
+                generator = type(ch).__name__ if type(ch).__name__ != "Channel" else "Sampler"
+
+            # Get IID (rack channel index)
+            ch_iid = safe_int(getattr(ch, "iid", idx), idx)
 
             ch_data = {
                 "index": idx,
+                "iid": ch_iid,
                 "name": str(ch_name),
-                "sample_path": sample_path,
+                "sample_path": resolved_sample_path or raw_sample_path,
+                "raw_sample_path": raw_sample_path,
                 "generator": str(generator)
             }
             
+            # Map by multiple keys so note.rack_channel always finds the exact channel
             channels_map[idx] = ch_data
+            channels_map[ch_iid] = ch_data
             channels_map[id(ch)] = ch_data
-            if hasattr(ch, "iid"):
-                channels_map[getattr(ch, "iid")] = ch_data
-
             channels_list.append(ch_data)
     except Exception as e:
         logger.warning(f"Error parsing channels in {filename}: {e}")
 
-    # 3. Extract Patterns and Notes
+    # 3. Extract Patterns and Notes per Instrument
     extracted_patterns: List[Dict[str, Any]] = []
     
+    raw_patterns = []
     try:
-        raw_patterns = list(getattr(project, "patterns", []))
+        if hasattr(project, "patterns"):
+            for pat in project.patterns:
+                raw_patterns.append(pat)
+    except Exception as e:
+        logger.debug(f"Patterns reading note for {filename}: {e}")
+
+    try:
         for p_idx, pat in enumerate(raw_patterns):
             pat_name = getattr(pat, "name", None) or f"Pattern {p_idx + 1}"
-            raw_notes = list(getattr(pat, "notes", []))
             
+            try:
+                raw_notes = list(getattr(pat, "notes", []))
+            except Exception:
+                raw_notes = []
+            
+            if not raw_notes:
+                continue
+
             # Group notes by channel index
             channel_notes: Dict[int, List[Dict[str, Any]]] = {}
             
             for n in raw_notes:
-                # Key / Pitch (handles 'G4', 'C#5', 60, enums, Note objects)
+                # Key / Pitch
                 pitch_val = getattr(n, "key", None)
                 if pitch_val is None:
                     pitch_val = getattr(n, "pitch", 60)
@@ -185,7 +212,7 @@ def parse_flp_project(flp_path: str) -> Optional[Dict[str, Any]]:
                     pos_val = getattr(n, "pos", 0)
                 pos = safe_int(pos_val, 0)
 
-                # Duration / Length
+                # Duration
                 dur_val = getattr(n, "length", None)
                 if dur_val is None:
                     dur_val = getattr(n, "duration", 96)
@@ -201,22 +228,22 @@ def parse_flp_project(flp_path: str) -> Optional[Dict[str, Any]]:
                     velocity = safe_int(vel_val, 100)
                 velocity = max(1, min(127, velocity))
 
-                # Resolve channel index safely
+                # Resolve channel index accurately via rack_channel (IID)
                 ch_idx = 0
                 rc = getattr(n, "rack_channel", None)
                 if rc is not None:
-                    info = channels_map.get(id(rc)) or channels_map.get(getattr(rc, "iid", None))
-                    if info:
-                        ch_idx = info["index"]
-                    elif hasattr(rc, "index"):
-                        ch_idx = safe_int(rc.index, 0)
+                    rc_int = safe_int(rc, -1)
+                    if rc_int in channels_map:
+                        ch_idx = channels_map[rc_int]["index"]
+                    elif id(rc) in channels_map:
+                        ch_idx = channels_map[id(rc)]["index"]
                 elif hasattr(n, "channel") and n.channel is not None:
                     c = n.channel
-                    if isinstance(c, int):
-                        ch_idx = c
-                    else:
-                        info = channels_map.get(id(c)) or channels_map.get(getattr(c, "iid", None))
-                        ch_idx = info["index"] if info else 0
+                    c_int = safe_int(c, -1)
+                    if c_int in channels_map:
+                        ch_idx = channels_map[c_int]["index"]
+                    elif id(c) in channels_map:
+                        ch_idx = channels_map[id(c)]["index"]
 
                 if ch_idx not in channel_notes:
                     channel_notes[ch_idx] = []
@@ -229,6 +256,8 @@ def parse_flp_project(flp_path: str) -> Optional[Dict[str, Any]]:
                 })
 
             # Create an entry for each channel containing notes in this pattern
+            multi_channel = len(channel_notes) > 1
+
             for ch_idx, notes_list in channel_notes.items():
                 if not notes_list:
                     continue
@@ -240,8 +269,8 @@ def parse_flp_project(flp_path: str) -> Optional[Dict[str, Any]]:
                 })
 
                 ch_name = ch_info["name"]
-                sample_name = os.path.basename(ch_info["sample_path"]) if ch_info.get("sample_path") else None
-                tag = classify_tag(ch_name, sample_name, notes_list, pat_name)
+                sample_full_path = ch_info.get("raw_sample_path") or ch_info.get("sample_path")
+                tag = classify_tag(ch_name, sample_full_path, notes_list, pat_name)
 
                 # Duration in bars
                 max_tick = max((item["pos"] + item["duration"]) for item in notes_list)
@@ -253,17 +282,22 @@ def parse_flp_project(flp_path: str) -> Optional[Dict[str, Any]]:
                 note_names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
                 root_note_name = note_names[root_pitch % 12]
 
+                # Display Name: if pattern has a generic name and is multi-channel, clarify with channel name
+                display_pat_name = pat_name
+                if multi_channel and re.match(r"^Pattern\s*\d+$", pat_name, re.I):
+                    display_pat_name = f"{pat_name} • {ch_name}"
+
                 # Generate standard MIDI bytes
                 midi_bytes = create_midi_bytes(
                     notes=notes_list,
                     tempo=tempo,
                     ppq=ppq,
-                    track_name=f"{pat_name} - {ch_name}"
+                    track_name=f"{display_pat_name} - {ch_name}"
                 )
 
                 extracted_patterns.append({
                     "pattern_index": p_idx,
-                    "pattern_name": pat_name,
+                    "pattern_name": display_pat_name,
                     "channel_index": ch_idx,
                     "channel_name": ch_name,
                     "sample_path": ch_info.get("sample_path"),

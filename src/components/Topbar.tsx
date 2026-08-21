@@ -8,21 +8,18 @@ export const Topbar: React.FC = () => {
   const {
     activeTab, setActiveTab,
     searchQuery, setSearchQuery,
-    seedDemoData, totalPatterns, totalSounds,
-    kitSounds, kitPatterns,
+     totalPatterns, totalSounds,
+    kits, activeKitId,
   } = useVaultStore();
 
   const language = useInterfaceStore((state) => state.language);
   const isRu = language === 'ru';
   const [profileOpen, setProfileOpen] = useState(false);
 
-  const totalKitItems = kitSounds.length + kitPatterns.length;
+  const activeKit = kits.find(k => k.id === activeKitId) || kits[0];
+  const totalKitItems = (activeKit?.sounds.length || 0) + (activeKit?.patterns.length || 0);
 
-  const handleSeed = async () => {
-    await seedDemoData();
-    notify.success(isRu ? 'Демо-семплы и MIDI успешно загружены' : 'Demo samples & MIDIs loaded successfully', 'Stasher');
-  };
-
+  
   return (
     <header className="topbar">
       {/* Workspace Switcher Tabs — exact Verse style */}
@@ -104,16 +101,7 @@ export const Topbar: React.FC = () => {
       )}
 
       {/* Demos Button */}
-      <button
-        className="soft-button"
-        onClick={handleSeed}
-        type="button"
-        style={{ minHeight: 34, padding: '0 14px', fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0 }}
-        title={isRu ? 'Загрузить тестовые данные' : 'Load demo data'}
-      >
-        <i className="ti ti-sparkles" style={{ color: 'var(--accent)' }} aria-hidden="true" />
-        <span>{isRu ? 'Демо FLP' : 'Load Demos'}</span>
-      </button>
+      
 
       {/* Circular Profile Button */}
       <button

@@ -12,9 +12,9 @@
   position: absolute;
   border: 1px solid var(--line);
   background: var(--popover-surface);
-  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.45), var(--glass-shadow);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.1), var(--glass-shadow);
+  backdrop-filter: blur(32px);
+  -webkit-backdrop-filter: blur(32px);
 }
 
 /* Universal Proximity Border Spotlight Glow across ALL buttons, inputs, chips, cards & panels */

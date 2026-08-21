@@ -76,6 +76,19 @@ function startPythonBackend() {
   pythonProcess.on('close', (code) => console.log(`[api] exited code=${code}`));
 }
 
+function stopPythonBackend() {
+  if (pythonProcess) {
+    try {
+      pythonProcess.kill('SIGTERM');
+      setTimeout(() => {
+        try {
+          if (pythonProcess) pythonProcess.kill('SIGKILL');
+        } catch {}
+      }, 500);
+    } catch {}
+    pythonProcess = null;
+  }
+}
 
 function waitForBackend(retries = 40) {
   return new Promise((resolve, reject) => {
@@ -108,6 +121,7 @@ function createWindow() {
     backgroundColor: process.platform === 'darwin' ? '#00000000' : '#0e1017',
     trafficLightPosition: { x: 16, y: 16 },
     show: false,
+    icon: path.join(__dirname, '..', 'icons', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
@@ -125,6 +139,13 @@ function createWindow() {
   mainWindow = new BrowserWindow(windowOptions);
 
   mainWindow.once('ready-to-show', () => mainWindow.show());
+
+  // Fully quit application and terminate all backend processes on close
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+    stopPythonBackend();
+    app.quit();
+  });
 
   const distPath = path.join(__dirname, '..', 'dist', 'index.html');
   if (process.env.VITE_DEV_SERVER_URL) {
@@ -217,10 +238,15 @@ app.whenReady().then(async () => {
   });
 });
 
+app.on('before-quit', () => {
+  stopPythonBackend();
+});
+
 app.on('will-quit', () => {
-  if (pythonProcess) pythonProcess.kill();
+  stopPythonBackend();
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+  stopPythonBackend();
+  app.quit();
 });
