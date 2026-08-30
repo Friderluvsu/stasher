@@ -64,12 +64,10 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
       onClose();
     } catch (err) {
       console.error('Failed to update item:', err);
-      updateItemInStore(itemType, itemId, name, tag);
-      notify.success(
-        isRu ? 'Изменения сохранены' : 'Changes saved',
+      notify.error(
+        isRu ? 'Ошибка при сохранении' : 'Failed to save changes',
         itemType === 'sound' ? 'StashSound' : 'MIDI Vault'
       );
-      onClose();
     } finally {
       setIsSaving(false);
     }

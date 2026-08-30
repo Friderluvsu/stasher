@@ -1,10 +1,12 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { api } from '../services/api';
+import { audioEngine } from '../services/audioEngine';
 
 interface WaveformPreviewProps {
   soundId: number;
   isPlaying: boolean;
   tag: string;
+  onSeek?: (progress: number) => void;
 }
 
 // Shared audio context for decoding
@@ -19,28 +21,36 @@ const getAudioCtx = () => {
 // Global cache to prevent re-fetching and re-decoding
 const peakCache = new Map<number, number[]>();
 
-export const WaveformPreview: React.FC<WaveformPreviewProps> = ({ soundId, isPlaying, tag }) => {
+export const WaveformPreview: React.FC<WaveformPreviewProps> = ({
+  soundId,
+  isPlaying,
+  tag,
+  onSeek,
+}) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [peaks, setPeaks] = useState<number[] | null>(peakCache.get(soundId) || null);
   const [isVisible, setIsVisible] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
+  const [hoverX, setHoverX] = useState<number | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   // Determine colors based on tag
-  const getTheme = () => {
-    const t = tag.toLowerCase();
-    if (t.includes('808') || t === 'bass') return { played: '#f87171', unplayed: 'rgba(248,113,113,0.3)' }; // red-400
-    if (t.includes('kick')) return { played: '#fb923c', unplayed: 'rgba(251,146,60,0.3)' }; // orange-400
-    if (t.includes('snare') || t.includes('clap') || t.includes('rim')) return { played: '#facc15', unplayed: 'rgba(250,204,21,0.3)' }; // yellow-400
-    if (t.includes('hat') || t.includes('crash')) return { played: '#22d3ee', unplayed: 'rgba(34,211,238,0.3)' }; // cyan-400
-    if (t.includes('chord')) return { played: '#34d399', unplayed: 'rgba(52,211,153,0.3)' }; // emerald-400
-    if (t.includes('melody') || t.includes('lead') || t.includes('pluck')) return { played: '#c084fc', unplayed: 'rgba(192,132,252,0.3)' }; // purple-400
-    if (t.includes('perc')) return { played: '#60a5fa', unplayed: 'rgba(96,165,250,0.3)' }; // blue-400
-    return { played: '#9ca3af', unplayed: 'rgba(156,163,175,0.3)' }; // gray-400
-  };
+  const getTheme = useCallback(() => {
+    const t = (tag || '').toLowerCase();
+    if (t.includes('808') || t === 'bass') return { played: '#ff6b81', unplayed: 'rgba(255,107,129,0.3)', glow: 'rgba(255,107,129,0.6)' };
+    if (t.includes('kick')) return { played: '#ff9f43', unplayed: 'rgba(255,159,67,0.3)', glow: 'rgba(255,159,67,0.6)' };
+    if (t.includes('snare') || t.includes('clap') || t.includes('rim')) return { played: '#feca57', unplayed: 'rgba(254,202,87,0.3)', glow: 'rgba(254,202,87,0.6)' };
+    if (t.includes('hat') || t.includes('crash')) return { played: '#48dbfb', unplayed: 'rgba(72,219,251,0.3)', glow: 'rgba(72,219,251,0.6)' };
+    if (t.includes('chord')) return { played: '#1dd1a1', unplayed: 'rgba(29,209,161,0.3)', glow: 'rgba(29,209,161,0.6)' };
+    if (t.includes('melody') || t.includes('lead') || t.includes('pluck')) return { played: '#a55eea', unplayed: 'rgba(165,94,234,0.3)', glow: 'rgba(165,94,234,0.6)' };
+    if (t.includes('perc')) return { played: '#54a0ff', unplayed: 'rgba(84,160,255,0.3)', glow: 'rgba(84,160,255,0.6)' };
+    return { played: '#9a90ff', unplayed: 'rgba(154,144,255,0.3)', glow: 'rgba(154,144,255,0.6)' };
+  }, [tag]);
 
   // 1. Intersection Observer to only load when visible
   useEffect(() => {
-    if (peaks) return; // Already have data
+    if (peaks) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
@@ -68,13 +78,13 @@ export const WaveformPreview: React.FC<WaveformPreviewProps> = ({ soundId, isPla
         const url = api.getSoundAudioUrl(soundId);
         const response = await fetch(url);
         const arrayBuffer = await response.arrayBuffer();
-        
+
         const ctx = getAudioCtx();
         const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
-        
-        // Extract peaks (downsample to 100 bars)
-        const numBuckets = 100;
-        const channelData = audioBuffer.getChannelData(0); // Left channel
+
+        // Extract peaks (downsample to 80 buckets)
+        const numBuckets = 80;
+        const channelData = audioBuffer.getChannelData(0);
         const blockSize = Math.floor(channelData.length / numBuckets);
         const extractedPeaks = new Array(numBuckets).fill(0);
 
@@ -89,9 +99,8 @@ export const WaveformPreview: React.FC<WaveformPreviewProps> = ({ soundId, isPla
           extractedPeaks[i] = Math.max(Math.abs(min), Math.abs(max));
         }
 
-        // Normalize
         const maxPeak = Math.max(...extractedPeaks, 0.01);
-        const normalized = extractedPeaks.map(p => p / maxPeak);
+        const normalized = extractedPeaks.map((p) => p / maxPeak);
 
         if (isMounted) {
           peakCache.set(soundId, normalized);
@@ -99,77 +108,116 @@ export const WaveformPreview: React.FC<WaveformPreviewProps> = ({ soundId, isPla
         }
       } catch (err) {
         console.warn(`Failed to decode waveform for sound ${soundId}:`, err);
-        // Fallback fake waveform
         if (isMounted) {
-          const fake = new Array(100).fill(0).map(() => Math.random() * 0.5 + 0.1);
+          const fake = new Array(80).fill(0).map(() => Math.random() * 0.5 + 0.1);
           setPeaks(fake);
         }
       }
     };
 
     loadAudio();
-    return () => { isMounted = false; };
+    return () => {
+      isMounted = false;
+    };
   }, [isVisible, soundId, peaks]);
 
   // 3. Draw on Canvas
-  const drawActiveCanvas = () => {
-    const canvas = canvasRef.current;
-    if (!canvas || !peaks) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    const width = canvas.width / (window.devicePixelRatio || 1);
-    const height = canvas.height / (window.devicePixelRatio || 1);
-    
-    const theme = getTheme();
-    // In FL studio, waveforms are dense. Let's make bars very thin or just a continuous path.
-    // For a 64px wide container, 100 buckets means ~0.6px per bucket. We can just draw lines.
-    ctx.clearRect(0, 0, width, height);
-    
-    // Draw background (unplayed) waveform
-    ctx.fillStyle = theme.unplayed;
-    const gap = 0;
-    const barWidth = width / peaks.length;
-    
-    ctx.beginPath();
-    // Top half
-    for (let i = 0; i < peaks.length; i++) {
-      const x = i * barWidth;
-      const h = Math.max(1, peaks[i] * (height / 2));
-      const y = (height / 2) - h;
-      ctx.rect(x, y, barWidth, h * 2);
-    }
-    ctx.fill();
+  const renderCanvas = useCallback(
+    (progress: number = 0) => {
+      const canvas = canvasRef.current;
+      if (!canvas || !peaks) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
 
-    // Draw active overlay if playing
-    if (isPlaying) {
-      ctx.globalCompositeOperation = 'source-atop';
-      ctx.fillStyle = theme.played;
-      const time = Date.now() / 150;
-      ctx.beginPath();
+      const dpr = window.devicePixelRatio || 1;
+      const width = canvas.width / dpr;
+      const height = canvas.height / dpr;
+
+      ctx.clearRect(0, 0, width, height);
+
+      const theme = getTheme();
+      const barWidth = width / peaks.length;
+      const playheadX = isPlaying ? progress * width : 0;
+
+      // Draw background / unplayed waveform
+      ctx.fillStyle = theme.unplayed;
       for (let i = 0; i < peaks.length; i++) {
         const x = i * barWidth;
-        const h = Math.max(1, peaks[i] * (height / 2));
-        const y = (height / 2) - h;
-        // Pulse effect across the waveform
-        const wave = (Math.sin(time - i * 0.15) + 1) / 2;
-        ctx.globalAlpha = 0.5 + wave * 0.5;
-        ctx.rect(x, y, barWidth, h * 2);
+        const h = Math.max(2, peaks[i] * (height / 2 - 2));
+        const y = height / 2 - h;
+        ctx.fillRect(x, y, Math.max(1, barWidth - 0.5), h * 2);
       }
-      ctx.fill();
-      ctx.globalAlpha = 1.0;
-      ctx.globalCompositeOperation = 'source-over';
-    }
-  };
 
+      // Draw played waveform overlay
+      if (isPlaying && progress > 0) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, 0, playheadX, height);
+        ctx.clip();
+
+        ctx.fillStyle = theme.played;
+        for (let i = 0; i < peaks.length; i++) {
+          const x = i * barWidth;
+          const h = Math.max(2, peaks[i] * (height / 2 - 2));
+          const y = height / 2 - h;
+          ctx.fillRect(x, y, Math.max(1, barWidth - 0.5), h * 2);
+        }
+
+        // Subtle gradient glow behind played section
+        const grad = ctx.createLinearGradient(0, 0, playheadX, 0);
+        grad.addColorStop(0, 'rgba(255,255,255,0.01)');
+        grad.addColorStop(1, theme.unplayed);
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, playheadX, height);
+
+        ctx.restore();
+
+        // Vertical Playhead Line
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+        ctx.shadowColor = theme.glow;
+        ctx.shadowBlur = 8;
+        ctx.beginPath();
+        ctx.moveTo(playheadX, 0);
+        ctx.lineTo(playheadX, height);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+
+        // Glowing playhead indicator handle at top
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(playheadX, 2.5, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Draw Hover Indicator Line
+      if (isHovered && hoverX !== null && !isDragging) {
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 2]);
+        ctx.beginPath();
+        ctx.moveTo(hoverX, 0);
+        ctx.lineTo(hoverX, height);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+        ctx.beginPath();
+        ctx.arc(hoverX, 2.5, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    },
+    [peaks, getTheme, isPlaying, isHovered, hoverX, isDragging]
+  );
+
+  // Setup HiDPI Canvas Scaling
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !peaks) return;
 
-    // Handle high DPI displays
     const dpr = window.devicePixelRatio || 1;
     const rect = canvas.getBoundingClientRect();
-    
-    // Only set width/height if changed to avoid clearing context unnecessarily
+
     if (canvas.width !== rect.width * dpr || canvas.height !== rect.height * dpr) {
       canvas.width = rect.width * dpr;
       canvas.height = rect.height * dpr;
@@ -177,37 +225,117 @@ export const WaveformPreview: React.FC<WaveformPreviewProps> = ({ soundId, isPla
       ctx?.scale(dpr, dpr);
     }
 
-    drawActiveCanvas();
-  }, [peaks, isPlaying, tag]);
+    renderCanvas(0);
+  }, [peaks, renderCanvas]);
 
   // Setup animation loop if playing
   useEffect(() => {
     let animationId: number;
     if (isPlaying && peaks) {
-      const render = () => {
-        drawActiveCanvas();
-        animationId = requestAnimationFrame(render);
+      const tick = () => {
+        const progress = audioEngine.getPlaybackProgress(soundId);
+        renderCanvas(progress);
+        animationId = requestAnimationFrame(tick);
       };
-      animationId = requestAnimationFrame(render);
+      animationId = requestAnimationFrame(tick);
+    } else {
+      renderCanvas(0);
     }
-    return () => cancelAnimationFrame(animationId);
-  }, [isPlaying, peaks]);
+    return () => {
+      if (animationId) cancelAnimationFrame(animationId);
+    };
+  }, [isPlaying, soundId, peaks, renderCanvas]);
+
+  const handleSeekAtEvent = useCallback(
+    (clientX: number) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const clickX = Math.max(0, Math.min(rect.width, clientX - rect.left));
+      const progress = clickX / rect.width;
+
+      if (onSeek) {
+        onSeek(progress);
+      } else {
+        audioEngine.seekSound(soundId, tag, progress);
+      }
+    },
+    [onSeek, soundId, tag]
+  );
+
+  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setIsDragging(true);
+    handleSeekAtEvent(e.clientX);
+  };
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+    setHoverX(x);
+
+    if (isDragging) {
+      handleSeekAtEvent(e.clientX);
+    }
+  };
+
+  const handleMouseUp = () => {
+    setIsDragging(false);
+  };
+
+  const handleMouseLeave = () => {
+    setIsDragging(false);
+    setIsHovered(false);
+    setHoverX(null);
+  };
+
+  const handleMouseEnter = () => {
+    setIsHovered(true);
+  };
 
   return (
-    <div ref={containerRef} className="w-16 h-7 flex items-center justify-center relative flex-shrink-0">
+    <div
+      ref={containerRef}
+      className="w-28 h-8 flex items-center justify-center relative flex-shrink-0 select-none group"
+      title="Click or drag waveform to seek"
+    >
       {!peaks ? (
-        // Loading state
-        <div className="flex gap-[2px] w-full h-full items-center opacity-20">
-          {[1,2,3,4].map(i => (
-            <div key={i} className="flex-1 bg-white/40 h-1/3 rounded-full animate-pulse" style={{animationDelay: `${i*0.1}s`}} />
+        <div className="flex gap-[2px] w-full h-full items-center opacity-20 px-2">
+          {[1, 2, 3, 4, 5, 6].map((i) => (
+            <div
+              key={i}
+              className="flex-1 bg-white/40 h-1/2 rounded-full animate-pulse"
+              style={{ animationDelay: `${i * 0.08}s` }}
+            />
           ))}
         </div>
       ) : (
         <canvas
           ref={canvasRef}
-          className="w-full h-full absolute inset-0 block"
-          style={{ width: '100%', height: '100%' }}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
+          className={`w-full h-full absolute inset-0 block rounded-lg border transition-all duration-200 cursor-pointer ${
+            isPlaying
+              ? 'border-[var(--accent)] shadow-[0_0_14px_rgba(154,144,255,0.3)] ring-1 ring-[var(--accent)]'
+              : 'border-white/10 hover:border-white/25 hover:shadow-[0_0_8px_rgba(255,255,255,0.06)]'
+          }`}
+          style={{ width: '100%', height: '100%', background: 'rgba(12, 14, 20, 0.85)' }}
         />
+      )}
+
+      {/* Hover seek percentage cue */}
+      {isHovered && peaks && (
+        <div
+          className="absolute -top-5 left-1/2 -translate-x-1/2 px-1.5 py-0.5 rounded text-[9px] font-mono font-semibold bg-[#12141d] text-[var(--accent)] border border-white/10 pointer-events-none shadow-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap"
+        >
+          {hoverX !== null ? `Seek ${(hoverX / 112 * 100).toFixed(0)}%` : 'Seek'}
+        </div>
       )}
     </div>
   );

@@ -13,21 +13,21 @@ class AudioEngine {
   private isSamplesLoaded = false;
   private loadingPromise: Promise<void> | null = null;
 
-  // Local API server endpoints
-  private sampleEndpoints: Record<string, string> = {
-    '808': 'http://127.0.0.1:8765/api/preview-samples/808.wav',
-    'bass': 'http://127.0.0.1:8765/api/preview-samples/808.wav',
-    'kick': 'http://127.0.0.1:8765/api/preview-samples/kick.wav',
-    'snare': 'http://127.0.0.1:8765/api/preview-samples/snare.wav',
-    'clap': 'http://127.0.0.1:8765/api/preview-samples/clap.wav',
-    'hi-hat': 'http://127.0.0.1:8765/api/preview-samples/hihat.wav',
-    'open hat': 'http://127.0.0.1:8765/api/preview-samples/openhat.wav',
-    'perc': 'http://127.0.0.1:8765/api/preview-samples/perc.wav',
-    'rim': 'http://127.0.0.1:8765/api/preview-samples/rim.wav',
-    'vox': 'http://127.0.0.1:8765/api/preview-samples/vox.wav',
-    'fx': 'http://127.0.0.1:8765/api/preview-samples/fx.wav',
-    'piano': 'http://127.0.0.1:8765/api/preview-samples/piano.wav',
-    'epiano': 'http://127.0.0.1:8765/api/preview-samples/epiano.wav',
+  // Sample files located in public/audio/preview/
+  private sampleFiles: Record<string, string> = {
+    '808': '808.wav',
+    'bass': '808.wav',
+    'kick': 'kick.wav',
+    'snare': 'snare.wav',
+    'clap': 'clap.wav',
+    'hi-hat': 'hihat.wav',
+    'open hat': 'openhat.wav',
+    'perc': 'perc.wav',
+    'rim': 'rim.wav',
+    'vox': 'vox.wav',
+    'fx': 'fx.wav',
+    'piano': 'piano.wav',
+    'epiano': 'epiano.wav',
   };
 
   private initContext() {
@@ -51,37 +51,76 @@ class AudioEngine {
 
     this.loadingPromise = (async () => {
       const timestamp = Date.now();
-      const entries = Object.entries(this.sampleEndpoints);
+      const entries = Object.entries(this.sampleFiles);
       await Promise.all(
-        entries.map(async ([key, url]) => {
-          try {
-            const res = await fetch(`${url}?v=${timestamp}`, { cache: 'no-store' });
-            if (!res.ok) {
-              console.warn(`[AudioEngine] HTTP ${res.status} loading sample: ${key}`);
-              return;
+        entries.map(async ([key, filename]) => {
+          // Try multiple candidate paths: local bundled assets first (0ms latency, works inside app.asar), then API server fallback
+          const candidateUrls = [
+            `./audio/preview/${filename}`,
+            `audio/preview/${filename}`,
+            `/audio/preview/${filename}`,
+            `http://127.0.0.1:8765/api/preview-samples/${filename}`,
+          ];
+
+          let loadedBuffer: AudioBuffer | null = null;
+
+          for (const url of candidateUrls) {
+            try {
+              const fetchUrl = url.startsWith('http') ? `${url}?v=${timestamp}` : url;
+              const res = await fetch(fetchUrl);
+              if (res.ok) {
+                const arrayBuffer = await res.arrayBuffer();
+                if (this.ctx && arrayBuffer.byteLength > 0) {
+                  loadedBuffer = await this.ctx.decodeAudioData(arrayBuffer);
+                  this.sampleBuffers.set(key, loadedBuffer);
+                  break;
+                }
+              }
+            } catch {
+              // Try next candidate path
             }
-            const arrayBuffer = await res.arrayBuffer();
-            if (this.ctx) {
-              const audioBuffer = await this.ctx.decodeAudioData(arrayBuffer);
-              this.sampleBuffers.set(key, audioBuffer);
-            }
-          } catch (e) {
-            console.warn(`[AudioEngine] Failed to load sample ${key} from ${url}:`, e);
+          }
+
+          if (!loadedBuffer) {
+            console.warn(`[AudioEngine] Could not load preview sample for "${key}" from any candidate URL.`);
           }
         })
       );
-      this.isSamplesLoaded = true;
-      console.log(`[AudioEngine] Preloaded ${this.sampleBuffers.size} audio samples (including fresh Piano).`);
+      this.isSamplesLoaded = this.sampleBuffers.size > 0;
+      console.log(`[AudioEngine] Successfully loaded ${this.sampleBuffers.size}/${entries.length} preview audio samples.`);
     })();
 
     return this.loadingPromise;
   }
+
+  private patternPlaybackInfo: {
+    patternId: number;
+    notes: NoteEvent[];
+    tempo: number;
+    ppq: number;
+    tag: string;
+    loop: boolean;
+    startTime: number;
+    patternDuration: number;
+    startOffsetSeconds: number;
+  } | null = null;
+  private seekTimeoutId: number | null = null;
+  private soundPlaybackInfo: {
+    soundId: number;
+    startTime: number;
+    duration: number;
+    startOffsetSeconds: number;
+  } | null = null;
 
   public setListener(cb: (isPlaying: boolean, patternId: number | null) => void) {
     this.onPlaybackStateChange = cb;
   }
 
   public stop() {
+    if (this.seekTimeoutId) {
+      window.clearTimeout(this.seekTimeoutId);
+      this.seekTimeoutId = null;
+    }
     if (this.loopInterval) {
       window.clearInterval(this.loopInterval);
       this.loopInterval = null;
@@ -98,10 +137,34 @@ class AudioEngine {
     this.scheduledNodes = [];
     this.isPlaying = false;
     this.currentPatternId = null;
+    this.patternPlaybackInfo = null;
+    this.soundPlaybackInfo = null;
     this.onPlaybackStateChange?.(false, null);
   }
 
-  public playSoundSample(soundId: number, tag: string) {
+  public getPlaybackProgress(id: number): number {
+    if (!this.isPlaying || this.currentPatternId !== id) return 0;
+
+    if (this.currentAudioElement && this.currentAudioElement.duration > 0) {
+      return Math.max(0, Math.min(1, this.currentAudioElement.currentTime / this.currentAudioElement.duration));
+    }
+
+    if (this.patternPlaybackInfo && this.ctx) {
+      const elapsed = (this.ctx.currentTime - this.patternPlaybackInfo.startTime) + this.patternPlaybackInfo.startOffsetSeconds;
+      const dur = this.patternPlaybackInfo.patternDuration;
+      if (dur <= 0) return 0;
+      return Math.max(0, Math.min(1, (elapsed % dur) / dur));
+    }
+
+    if (this.soundPlaybackInfo && this.ctx && this.soundPlaybackInfo.duration > 0) {
+      const elapsed = (this.ctx.currentTime - this.soundPlaybackInfo.startTime) + this.soundPlaybackInfo.startOffsetSeconds;
+      return Math.max(0, Math.min(1, elapsed / this.soundPlaybackInfo.duration));
+    }
+
+    return 0;
+  }
+
+  public playSoundSample(soundId: number, tag: string, startProgress: number = 0) {
     this.initContext();
     this.stop();
 
@@ -113,6 +176,32 @@ class AudioEngine {
     const audio = new Audio(audioUrl);
     this.currentAudioElement = audio;
 
+    const playFallback = () => {
+      if (!this.ctx) return;
+      const startTime = this.ctx.currentTime;
+      const dur = 0.8;
+      const clampedProgress = Math.max(0, Math.min(0.95, startProgress));
+      const startOffset = clampedProgress * dur;
+      this.soundPlaybackInfo = {
+        soundId,
+        startTime,
+        duration: dur,
+        startOffsetSeconds: startOffset,
+      };
+      this.synthesizeNote(60, startTime, Math.max(0.1, dur - startOffset), 1.0, tag);
+      setTimeout(() => {
+        if (this.currentPatternId === soundId) {
+          this.stop();
+        }
+      }, (dur - startOffset + 0.1) * 1000);
+    };
+
+    audio.onloadedmetadata = () => {
+      if (startProgress > 0 && audio.duration > 0) {
+        audio.currentTime = Math.max(0, Math.min(audio.duration - 0.05, startProgress * audio.duration));
+      }
+    };
+
     audio.onended = () => {
       if (this.currentPatternId === soundId) {
         this.stop();
@@ -120,26 +209,21 @@ class AudioEngine {
     };
 
     audio.onerror = () => {
-      if (!this.ctx) return;
-      const startTime = this.ctx.currentTime;
-      this.synthesizeNote(60, startTime, 0.6, 1.0, tag);
-      setTimeout(() => {
-        if (this.currentPatternId === soundId) {
-          this.stop();
-        }
-      }, 700);
+      playFallback();
     };
 
     audio.play().catch(() => {
-      if (!this.ctx) return;
-      const startTime = this.ctx.currentTime;
-      this.synthesizeNote(60, startTime, 0.6, 1.0, tag);
-      setTimeout(() => {
-        if (this.currentPatternId === soundId) {
-          this.stop();
-        }
-      }, 700);
+      playFallback();
     });
+  }
+
+  public seekSound(soundId: number, tag: string, progress: number) {
+    if (this.isPlaying && this.currentPatternId === soundId && this.currentAudioElement && this.currentAudioElement.duration > 0) {
+      this.currentAudioElement.currentTime = Math.max(0, Math.min(this.currentAudioElement.duration - 0.05, progress * this.currentAudioElement.duration));
+      this.currentAudioElement.play().catch(() => {});
+      return;
+    }
+    this.playSoundSample(soundId, tag, progress);
   }
 
   public async playPattern(
@@ -148,12 +232,13 @@ class AudioEngine {
     tempo: number = 140,
     ppq: number = 96,
     tag: string = 'Other',
-    loop: boolean = true
+    loop: boolean = true,
+    startProgress: number = 0
   ) {
     this.initContext();
     if (!this.ctx || !notes || notes.length === 0) return;
 
-    if (this.isPlaying && this.currentPatternId === patternId) {
+    if (this.isPlaying && this.currentPatternId === patternId && startProgress === 0) {
       this.stop();
       return;
     }
@@ -167,33 +252,68 @@ class AudioEngine {
       await this.preloadSamples();
     }
 
-    if (!this.isPlaying || this.currentPatternId !== patternId) return;
+    if (!this.isPlaying || this.currentPatternId !== patternId || !this.ctx) return;
 
     const secondsPerTick = (60 / tempo) / ppq;
     const maxTick = Math.max(...notes.map((n) => n.pos + n.duration));
-    const patternDuration = Math.max(1, maxTick * secondsPerTick);
+    const patternDuration = Math.max(0.5, maxTick * secondsPerTick);
+    const clampedProgress = Math.max(0, Math.min(0.98, startProgress));
+    const startOffsetSeconds = clampedProgress * patternDuration;
 
-    const scheduleNotes = () => {
-      if (!this.ctx || !this.isPlaying) return;
-      const startTime = this.ctx.currentTime + 0.05;
+    const scheduleFromOffset = (offsetSeconds: number) => {
+      if (!this.ctx || !this.isPlaying || this.currentPatternId !== patternId) return;
+      const startTime = this.ctx.currentTime + 0.03;
 
       notes.forEach((n) => {
-        const noteStart = startTime + n.pos * secondsPerTick;
-        const noteDuration = Math.max(0.04, n.duration * secondsPerTick);
-        const velocity = (n.velocity || 100) / 127;
-        this.synthesizeNote(n.pitch, noteStart, noteDuration, velocity, tag);
+        const noteTimeFromPatternStart = n.pos * secondsPerTick;
+        if (noteTimeFromPatternStart >= offsetSeconds - 0.001) {
+          const noteStart = startTime + (noteTimeFromPatternStart - offsetSeconds);
+          const noteDuration = Math.max(0.04, n.duration * secondsPerTick);
+          const velocity = (n.velocity || 100) / 127;
+          this.synthesizeNote(n.pitch, noteStart, noteDuration, velocity, tag);
+        }
       });
+
+      this.patternPlaybackInfo = {
+        patternId,
+        notes,
+        tempo,
+        ppq,
+        tag,
+        loop,
+        startTime,
+        patternDuration,
+        startOffsetSeconds: offsetSeconds,
+      };
     };
 
-    scheduleNotes();
+    scheduleFromOffset(startOffsetSeconds);
 
     if (loop) {
-      this.loopInterval = window.setInterval(() => {
-        if (this.isPlaying) {
-          scheduleNotes();
+      const remainingFirstCycleSeconds = (1 - clampedProgress) * patternDuration;
+      this.seekTimeoutId = window.setTimeout(() => {
+        if (this.isPlaying && this.currentPatternId === patternId) {
+          scheduleFromOffset(0);
+          this.loopInterval = window.setInterval(() => {
+            if (this.isPlaying && this.currentPatternId === patternId) {
+              scheduleFromOffset(0);
+            }
+          }, patternDuration * 1000);
         }
-      }, patternDuration * 1000);
+      }, remainingFirstCycleSeconds * 1000);
     }
+  }
+
+  public seekPattern(
+    patternId: number,
+    notes: NoteEvent[],
+    tempo: number = 140,
+    ppq: number = 96,
+    tag: string = 'Other',
+    progress: number = 0,
+    loop: boolean = true
+  ) {
+    this.playPattern(patternId, notes, tempo, ppq, tag, loop, progress);
   }
 
   public async playStack(

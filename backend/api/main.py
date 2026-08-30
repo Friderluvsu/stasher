@@ -23,7 +23,9 @@ if backend_dir not in sys.path:
 try:
     from backend.core.database import (
         init_db, save_project, query_patterns, query_sounds, get_pattern_midi,
-        get_sound_by_id, export_sound_kit_zip, get_projects, delete_project
+        get_sound_by_id, export_sound_kit_zip, get_projects, delete_project,
+        delete_sounds, delete_patterns, update_sounds_tag, update_patterns_tag,
+        update_sound, update_pattern
     )
     from backend.core.parser import parse_flp_project
     from backend.core.midi_generator import create_midi_bytes
@@ -31,7 +33,9 @@ except Exception:
     try:
         from core.database import (
             init_db, save_project, query_patterns, query_sounds, get_pattern_midi,
-            get_sound_by_id, export_sound_kit_zip, get_projects, delete_project
+            get_sound_by_id, export_sound_kit_zip, get_projects, delete_project,
+            delete_sounds, delete_patterns, update_sounds_tag, update_patterns_tag,
+            update_sound, update_pattern
         )
         from core.parser import parse_flp_project
         from core.midi_generator import create_midi_bytes
@@ -267,25 +271,48 @@ def remove_project(project_id: int):
 def get_preview_sample(sample_name: str, response: Response):
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     clean_name = sample_name if sample_name.endswith(".wav") else f"{sample_name}.wav"
-    desktop_preview = os.path.expanduser("~/Desktop/preview")
-    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
     
-    # Priority 1: Check in Desktop/preview
     possible_paths = []
-    if "piano" in sample_name.lower() or "keys" in sample_name.lower():
-        possible_paths.append(os.path.join(desktop_preview, "(c) keys - piano (pbj & t9c).wav"))
-    
+
+    # 1. PyInstaller onefile temp extract directory
+    if hasattr(sys, "_MEIPASS"):
+        possible_paths.extend([
+            os.path.join(sys._MEIPASS, "public", "audio", "preview", clean_name),
+            os.path.join(sys._MEIPASS, "audio", "preview", clean_name),
+            os.path.join(sys._MEIPASS, clean_name),
+        ])
+
+    # 2. Current working directory (e.g. process.resourcesPath in Electron packaged app or project root in dev)
+    cwd = os.getcwd()
     possible_paths.extend([
-        os.path.join(desktop_preview, clean_name),
-        os.path.join(base_dir, "public", "audio", "preview", clean_name),
-        os.path.join("public", "audio", "preview", clean_name),
+        os.path.join(cwd, "audio", "preview", clean_name),
+        os.path.join(cwd, "public", "audio", "preview", clean_name),
+        os.path.join(cwd, "dist", "audio", "preview", clean_name),
     ])
-    
+
+    # 3. Relative to the running executable or script
+    exec_dir = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__))
+    possible_paths.extend([
+        os.path.join(exec_dir, "audio", "preview", clean_name),
+        os.path.join(exec_dir, "..", "audio", "preview", clean_name),
+        os.path.join(exec_dir, "..", "public", "audio", "preview", clean_name),
+        os.path.join(exec_dir, "..", "dist", "audio", "preview", clean_name),
+        os.path.join(exec_dir, "..", "..", "public", "audio", "preview", clean_name),
+        os.path.join(exec_dir, "..", "..", "dist", "audio", "preview", clean_name),
+    ])
+
+    # 4. Project root in dev mode
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    possible_paths.extend([
+        os.path.join(base_dir, "public", "audio", "preview", clean_name),
+        os.path.join(base_dir, "dist", "audio", "preview", clean_name),
+    ])
+
     for p in possible_paths:
-        if os.path.exists(p) and os.path.isfile(p):
+        if p and os.path.exists(p) and os.path.isfile(p):
             return FileResponse(p, media_type="audio/wav", headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
     raise HTTPException(status_code=404, detail=f"Preview sample {sample_name} not found")
+
 
 
 @app.post("/api/demo-seed")
@@ -661,10 +688,16 @@ class UpdateItemRequest(BaseModel):
     name: str
     tag: str
 
+class BatchDeleteRequest(BaseModel):
+    ids: List[int]
+
+class BatchTagRequest(BaseModel):
+    ids: List[int]
+    tag: str
+
 @app.patch("/api/sounds/{sound_id}")
 def update_sound_endpoint(sound_id: int, req: UpdateItemRequest):
     try:
-        from backend.core.database import update_sound
         update_sound(sound_id, req.name, req.tag)
         return {"success": True}
     except Exception as e:
@@ -674,12 +707,48 @@ def update_sound_endpoint(sound_id: int, req: UpdateItemRequest):
 @app.patch("/api/patterns/{pattern_id}")
 def update_pattern_endpoint(pattern_id: int, req: UpdateItemRequest):
     try:
-        from backend.core.database import update_pattern
         update_pattern(pattern_id, req.name, req.tag)
         return {"success": True}
     except Exception as e:
         logger.error(f"Error updating pattern {pattern_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/sounds/batch")
+def batch_delete_sounds_endpoint(req: BatchDeleteRequest):
+    try:
+        delete_sounds(req.ids)
+        return {"success": True, "count": len(req.ids)}
+    except Exception as e:
+        logger.error(f"Error in batch delete sounds: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/patterns/batch")
+def batch_delete_patterns_endpoint(req: BatchDeleteRequest):
+    try:
+        delete_patterns(req.ids)
+        return {"success": True, "count": len(req.ids)}
+    except Exception as e:
+        logger.error(f"Error in batch delete patterns: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.patch("/api/sounds/batch-tag")
+def batch_tag_sounds_endpoint(req: BatchTagRequest):
+    try:
+        update_sounds_tag(req.ids, req.tag)
+        return {"success": True, "count": len(req.ids), "tag": req.tag}
+    except Exception as e:
+        logger.error(f"Error in batch tag sounds: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.patch("/api/patterns/batch-tag")
+def batch_tag_patterns_endpoint(req: BatchTagRequest):
+    try:
+        update_patterns_tag(req.ids, req.tag)
+        return {"success": True, "count": len(req.ids), "tag": req.tag}
+    except Exception as e:
+        logger.error(f"Error in batch tag patterns: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 if __name__ == "__main__":
     import multiprocessing

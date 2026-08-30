@@ -11,6 +11,7 @@ import { SectionTransitionView } from './components/SectionTransitionView';
 import { ToastContainer } from './components/ToastContainer';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { notify } from './state/toastStore';
+import { BatchActionBar } from './components/BatchActionBar';
 import { audioEngine } from './services/audioEngine';
 import type { ProjectItem } from './services/api';
 
@@ -18,10 +19,13 @@ export default function App() {
   const {
     activeTab,
     patterns, sounds, projects,
+    selectedTag,
     selectedProjectId, setSelectedProjectId,
     fetchPatterns, fetchSounds, fetchProjects, seedDemoData,
     startScan, uploadAndScan, isScanning, scanProgress,
-    deleteProject
+    deleteProject,
+    selectedSoundIds, selectedPatternIds,
+    selectAllSounds, selectAllPatterns
   } = useVaultStore();
 
   const { theme, language } = useInterfaceStore();
@@ -313,12 +317,12 @@ export default function App() {
               </div>
             )}
 
-            <SectionTransitionView sectionKey={`${activeTab}:${selectedProjectId || 'all'}`}>
+            <SectionTransitionView sectionKey={`${activeTab}:${selectedProjectId || 'all'}:${selectedTag}`}>
               {activeTab === 'kit' ? (
                 <KitBuilder />
               ) : activeTab === 'sounds' ? (
                 <div className="workspace-content" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <div className="page-heading">
+                  <div className="page-heading flex items-start justify-between">
                     <div>
                       <p className="eyebrow">{isRu ? 'Хранилище аудио' : 'Audio Library'}</p>
                       <div className="title-line">
@@ -331,6 +335,33 @@ export default function App() {
                           : 'Every drum one-shot, 808, kick, snare, hat, and percussion extracted directly from your FL Studio project files.'}
                       </p>
                     </div>
+
+                    {sounds.length > 0 && (
+                      <button
+                        onClick={() => selectAllSounds()}
+                        className="soft-button flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-xl transition-all cursor-pointer shrink-0 mt-2"
+                        style={{ minHeight: 32 }}
+                        type="button"
+                        title={isRu ? 'Выбрать все семплы' : 'Select all samples'}
+                      >
+                        <i
+                          className={`ti ${
+                            selectedSoundIds.length === sounds.length && sounds.length > 0
+                              ? 'ti-checkbox'
+                              : 'ti-square-check'
+                          } text-sm text-[var(--accent)]`}
+                        />
+                        <span>
+                          {selectedSoundIds.length === sounds.length && sounds.length > 0
+                            ? isRu
+                              ? 'Снять все'
+                              : 'Deselect All'
+                            : isRu
+                            ? 'Выбрать все'
+                            : 'Select All'}
+                        </span>
+                      </button>
+                    )}
                   </div>
 
                   {sounds.length === 0 && !isScanning ? (
@@ -381,7 +412,7 @@ export default function App() {
                 </div>
               ) : (
                 <div className="workspace-content" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <div className="page-heading">
+                  <div className="page-heading flex items-start justify-between">
                     <div>
                       <p className="eyebrow">{isRu ? 'MIDI Хранилище' : 'MIDI Vault'}</p>
                       <div className="title-line">
@@ -394,6 +425,33 @@ export default function App() {
                           : 'Melodies, chord progressions, 808 slides, and drum grooves with instant drag-and-drop to your DAW.'}
                       </p>
                     </div>
+
+                    {patterns.length > 0 && (
+                      <button
+                        onClick={() => selectAllPatterns()}
+                        className="soft-button flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-xl transition-all cursor-pointer shrink-0 mt-2"
+                        style={{ minHeight: 32 }}
+                        type="button"
+                        title={isRu ? 'Выбрать все паттерны' : 'Select all patterns'}
+                      >
+                        <i
+                          className={`ti ${
+                            selectedPatternIds.length === patterns.length && patterns.length > 0
+                              ? 'ti-checkbox'
+                              : 'ti-square-check'
+                          } text-sm text-[var(--accent)]`}
+                        />
+                        <span>
+                          {selectedPatternIds.length === patterns.length && patterns.length > 0
+                            ? isRu
+                              ? 'Снять все'
+                              : 'Deselect All'
+                            : isRu
+                            ? 'Выбрать все'
+                            : 'Select All'}
+                        </span>
+                      </button>
+                    )}
                   </div>
 
                   {patterns.length === 0 && !isScanning ? (
@@ -447,6 +505,8 @@ export default function App() {
           </div>
         </div>
       </div>
+
+      <BatchActionBar />
 
       {/* Confirm Delete Project Dialog */}
       <ConfirmDialog

@@ -9,6 +9,20 @@ from typing import List, Dict, Any, Optional
 DEFAULT_DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "stasher_data")
 DB_PATH = os.environ.get("STASHER_DB_PATH", os.path.join(DEFAULT_DATA_DIR, "stasher.db"))
 
+CANONICAL_TAGS = {
+    '808': '808', 'kick': 'Kick', 'snare': 'Snare', 'clap': 'Clap',
+    'hi-hat': 'Hi-Hat', 'hihat': 'Hi-Hat', 'open hat': 'Open Hat', 'openhat': 'Open Hat',
+    'rim': 'Rim', 'perc': 'Perc', 'tom': 'Tom', 'crash': 'Crash',
+    'bass': 'Bass', 'chords': 'Chords', 'melody': 'Melody',
+    'lead': 'Lead', 'pluck': 'Pluck', 'vox': 'Vox', 'fx': 'FX', 'other': 'Other'
+}
+
+def normalize_tag(tag: Optional[str]) -> str:
+    if not tag:
+        return 'Other'
+    t = tag.strip().lower()
+    return CANONICAL_TAGS.get(t, tag.strip())
+
 def get_connection() -> sqlite3.Connection:
     try:
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -330,7 +344,7 @@ def query_patterns(
         params.append(f"{search.strip()}*")
 
     if tag and tag != "All":
-        where_clauses.append("p.tag = ?")
+        where_clauses.append("p.tag = ? COLLATE NOCASE")
         params.append(tag)
 
     if min_bpm is not None:
@@ -379,11 +393,14 @@ def query_patterns(
             del item["notes_json"]
         items.append(item)
 
-    # Tag statistics for patterns
+    # Tag statistics for patterns (normalized canonical tags)
     cursor.execute("""
-    SELECT tag, COUNT(*) as count FROM patterns GROUP BY tag ORDER BY count DESC
+    SELECT tag, COUNT(*) as count FROM patterns GROUP BY tag COLLATE NOCASE ORDER BY count DESC
     """)
-    tag_counts = {row["tag"]: row["count"] for row in cursor.fetchall()}
+    tag_counts: Dict[str, int] = {}
+    for row in cursor.fetchall():
+        c_tag = normalize_tag(row["tag"])
+        tag_counts[c_tag] = tag_counts.get(c_tag, 0) + row["count"]
 
     conn.close()
     return {
@@ -410,7 +427,7 @@ def query_sounds(
         params.append(f"{search.strip()}*")
 
     if tag and tag != "All":
-        where_clauses.append("s.tag = ?")
+        where_clauses.append("s.tag = ? COLLATE NOCASE")
         params.append(tag)
 
     if project_id is not None:
@@ -439,11 +456,14 @@ def query_sounds(
     cursor.execute(select_sql, params + [limit, offset])
     items = [dict(row) for row in cursor.fetchall()]
 
-    # Tag statistics for sounds
+    # Tag statistics for sounds (normalized canonical tags)
     cursor.execute("""
-    SELECT tag, COUNT(*) as count FROM sounds GROUP BY tag ORDER BY count DESC
+    SELECT tag, COUNT(*) as count FROM sounds GROUP BY tag COLLATE NOCASE ORDER BY count DESC
     """)
-    tag_counts = {row["tag"]: row["count"] for row in cursor.fetchall()}
+    tag_counts: Dict[str, int] = {}
+    for row in cursor.fetchall():
+        c_tag = normalize_tag(row["tag"])
+        tag_counts[c_tag] = tag_counts.get(c_tag, 0) + row["count"]
 
     conn.close()
     return {
@@ -576,13 +596,96 @@ def delete_project(project_id: int):
 def update_sound(sound_id: int, name: str, tag: str):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("UPDATE sounds SET sample_name = ?, tag = ? WHERE id = ?", (name, tag, sound_id))
-    cursor.execute("UPDATE fts_sounds SET sample_name = ?, tag = ? WHERE sound_id = ?", (name, tag, sound_id))
+    norm_tag = normalize_tag(tag)
+    if name and name.strip():
+        cursor.execute("UPDATE sounds SET sample_name = ?, tag = ? WHERE id = ?", (name.strip(), norm_tag, sound_id))
+    else:
+        cursor.execute("UPDATE sounds SET tag = ? WHERE id = ?", (norm_tag, sound_id))
+    try:
+        if name and name.strip():
+            cursor.execute("UPDATE fts_sounds SET sample_name = ?, tag = ? WHERE sound_id = ?", (name.strip(), norm_tag, sound_id))
+        else:
+            cursor.execute("UPDATE fts_sounds SET tag = ? WHERE sound_id = ?", (norm_tag, sound_id))
+    except Exception:
+        pass
     conn.commit()
+    conn.close()
 
 def update_pattern(pattern_id: int, name: str, tag: str):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("UPDATE patterns SET pattern_name = ?, tag = ? WHERE id = ?", (name, tag, pattern_id))
-    cursor.execute("UPDATE fts_patterns SET pattern_name = ?, tag = ? WHERE pattern_id = ?", (name, tag, pattern_id))
+    norm_tag = normalize_tag(tag)
+    if name and name.strip():
+        cursor.execute("UPDATE patterns SET pattern_name = ?, tag = ? WHERE id = ?", (name.strip(), norm_tag, pattern_id))
+    else:
+        cursor.execute("UPDATE patterns SET tag = ? WHERE id = ?", (norm_tag, pattern_id))
+    try:
+        if name and name.strip():
+            cursor.execute("UPDATE fts_patterns SET pattern_name = ?, tag = ? WHERE pattern_id = ?", (name.strip(), norm_tag, pattern_id))
+        else:
+            cursor.execute("UPDATE fts_patterns SET tag = ? WHERE pattern_id = ?", (norm_tag, pattern_id))
+    except Exception:
+        pass
     conn.commit()
+    conn.close()
+
+def delete_sounds(sound_ids: List[int]):
+    if not sound_ids:
+        return
+    conn = get_connection()
+    cursor = conn.cursor()
+    placeholders = ",".join(["?"] * len(sound_ids))
+    try:
+        cursor.execute(f"DELETE FROM fts_sounds WHERE sound_id IN ({placeholders})", sound_ids)
+    except Exception:
+        pass
+    cursor.execute(f"DELETE FROM sounds WHERE id IN ({placeholders})", sound_ids)
+    conn.commit()
+    conn.close()
+
+def delete_patterns(pattern_ids: List[int]):
+    if not pattern_ids:
+        return
+    conn = get_connection()
+    cursor = conn.cursor()
+    placeholders = ",".join(["?"] * len(pattern_ids))
+    try:
+        cursor.execute(f"DELETE FROM fts_patterns WHERE pattern_id IN ({placeholders})", pattern_ids)
+    except Exception:
+        pass
+    cursor.execute(f"DELETE FROM patterns WHERE id IN ({placeholders})", pattern_ids)
+    conn.commit()
+    conn.close()
+
+def update_sounds_tag(sound_ids: List[int], tag: str):
+    if not sound_ids or not tag:
+        return
+    conn = get_connection()
+    cursor = conn.cursor()
+    norm_tag = normalize_tag(tag)
+    placeholders = ",".join(["?"] * len(sound_ids))
+    params = [norm_tag] + list(sound_ids)
+    cursor.execute(f"UPDATE sounds SET tag = ? WHERE id IN ({placeholders})", params)
+    try:
+        cursor.execute(f"UPDATE fts_sounds SET tag = ? WHERE sound_id IN ({placeholders})", params)
+    except Exception:
+        pass
+    conn.commit()
+    conn.close()
+
+def update_patterns_tag(pattern_ids: List[int], tag: str):
+    if not pattern_ids or not tag:
+        return
+    conn = get_connection()
+    cursor = conn.cursor()
+    norm_tag = normalize_tag(tag)
+    placeholders = ",".join(["?"] * len(pattern_ids))
+    params = [norm_tag] + list(pattern_ids)
+    cursor.execute(f"UPDATE patterns SET tag = ? WHERE id IN ({placeholders})", params)
+    try:
+        cursor.execute(f"UPDATE fts_patterns SET tag = ? WHERE pattern_id IN ({placeholders})", params)
+    except Exception:
+        pass
+    conn.commit()
+    conn.close()
+

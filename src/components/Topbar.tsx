@@ -20,6 +20,56 @@ export const Topbar: React.FC = () => {
   const totalKitItems = (activeKit?.sounds.length || 0) + (activeKit?.patterns.length || 0);
 
   
+  const [isKitDropTarget, setIsKitDropTarget] = useState(false);
+
+  const handleKitDragOver = (e: React.DragEvent) => {
+    const isInternal =
+      (window as any).__stasher_is_internal_drag ||
+      (window as any).__stasher_drag_item ||
+      e.dataTransfer.types.includes('application/x-stasher-internal');
+
+    if (isInternal) {
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'copy';
+      setIsKitDropTarget(true);
+    }
+  };
+
+  const handleKitDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsKitDropTarget(false);
+  };
+
+  const handleKitDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsKitDropTarget(false);
+
+    const internalItem = (window as any).__stasher_drag_item;
+    const itemType = internalItem?.type || e.dataTransfer.getData('application/x-stasher-item-type');
+    const ids: number[] = internalItem?.ids || [];
+
+    const { sounds, patterns, toggleKitSound, toggleKitPattern } = useVaultStore.getState();
+
+    if (itemType === 'sound') {
+      const itemsToAdd = sounds.filter((s) => ids.includes(s.id));
+      itemsToAdd.forEach((s) => toggleKitSound(s));
+      notify.success(
+        isRu ? `Добавлено в кит: ${itemsToAdd.length} семплов` : `Added ${itemsToAdd.length} samples to kit`,
+        'Kit Builder'
+      );
+    } else if (itemType === 'pattern') {
+      const itemsToAdd = patterns.filter((p) => ids.includes(p.id));
+      itemsToAdd.forEach((p) => toggleKitPattern(p));
+      notify.success(
+        isRu ? `Добавлено в кит: ${itemsToAdd.length} паттернов` : `Added ${itemsToAdd.length} patterns to kit`,
+        'Kit Builder'
+      );
+    }
+  };
+
   return (
     <header className="topbar">
       {/* Workspace Switcher Tabs — exact Verse style */}
@@ -45,9 +95,17 @@ export const Topbar: React.FC = () => {
         </button>
 
         <button
-          className={activeTab === 'kit' ? 'is-active' : ''}
+          className={`${activeTab === 'kit' ? 'is-active' : ''} ${
+            isKitDropTarget
+              ? 'ring-2 ring-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)] scale-105 shadow-[0_0_16px_rgba(154,144,255,0.4)]'
+              : ''
+          }`}
           onClick={() => setActiveTab('kit')}
+          onDragOver={handleKitDragOver}
+          onDragLeave={handleKitDragLeave}
+          onDrop={handleKitDrop}
           type="button"
+          title={isRu ? 'Кит Билдер (перетащите сюда для добавления в кит)' : 'Kit Builder (drop here to add to kit)'}
         >
           <i className="ti ti-archive" aria-hidden="true" />
           <span>{isRu ? 'Кит Билдер' : 'Kit Builder'}</span>

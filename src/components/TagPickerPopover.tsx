@@ -12,29 +12,30 @@ interface TagPickerPopoverProps {
 
 interface TagConfig {
   name: string;
+  icon: string;
   color: string;
   bg: string;
 }
 
 const TAG_CONFIGS: TagConfig[] = [
-  { name: '808', color: '#ff6b81', bg: 'rgba(255, 107, 129, 0.22)' },
-  { name: 'Kick', color: '#ff9f43', bg: 'rgba(255, 159, 67, 0.22)' },
-  { name: 'Snare', color: '#feca57', bg: 'rgba(254, 202, 87, 0.22)' },
-  { name: 'Clap', color: '#feca57', bg: 'rgba(254, 202, 87, 0.22)' },
-  { name: 'Hi-Hat', color: '#48dbfb', bg: 'rgba(72, 219, 251, 0.22)' },
-  { name: 'Open Hat', color: '#48dbfb', bg: 'rgba(72, 219, 251, 0.22)' },
-  { name: 'Rim', color: '#feca57', bg: 'rgba(254, 202, 87, 0.22)' },
-  { name: 'Perc', color: '#54a0ff', bg: 'rgba(84, 160, 255, 0.22)' },
-  { name: 'Tom', color: '#ff9f43', bg: 'rgba(255, 159, 67, 0.22)' },
-  { name: 'Crash', color: '#48dbfb', bg: 'rgba(72, 219, 251, 0.22)' },
-  { name: 'Bass', color: '#ff6b81', bg: 'rgba(255, 107, 129, 0.22)' },
-  { name: 'Chords', color: '#71c89f', bg: 'rgba(113, 200, 159, 0.22)' },
-  { name: 'Melody', color: '#9a90ff', bg: 'rgba(154, 144, 255, 0.24)' },
-  { name: 'Lead', color: '#9a90ff', bg: 'rgba(154, 144, 255, 0.24)' },
-  { name: 'Pluck', color: '#9a90ff', bg: 'rgba(154, 144, 255, 0.24)' },
-  { name: 'Vox', color: '#1dd1a1', bg: 'rgba(29, 209, 161, 0.22)' },
-  { name: 'FX', color: '#ff9ff3', bg: 'rgba(255, 159, 243, 0.22)' },
-  { name: 'Other', color: '#8a92a1', bg: 'rgba(138, 146, 161, 0.22)' },
+  { name: '808', icon: 'ti-flame', color: '#ff6b81', bg: 'rgba(255, 107, 129, 0.22)' },
+  { name: 'Kick', icon: 'ti-circle-dot', color: '#ff9f43', bg: 'rgba(255, 159, 67, 0.22)' },
+  { name: 'Snare', icon: 'ti-circle-dashed', color: '#feca57', bg: 'rgba(254, 202, 87, 0.22)' },
+  { name: 'Clap', icon: 'ti-hand-stop', color: '#feca57', bg: 'rgba(254, 202, 87, 0.22)' },
+  { name: 'Hi-Hat', icon: 'ti-sparkles', color: '#48dbfb', bg: 'rgba(72, 219, 251, 0.22)' },
+  { name: 'Open Hat', icon: 'ti-ripple', color: '#48dbfb', bg: 'rgba(72, 219, 251, 0.22)' },
+  { name: 'Rim', icon: 'ti-crosshair', color: '#feca57', bg: 'rgba(254, 202, 87, 0.22)' },
+  { name: 'Perc', icon: 'ti-grain', color: '#54a0ff', bg: 'rgba(84, 160, 255, 0.22)' },
+  { name: 'Tom', icon: 'ti-circles', color: '#ff9f43', bg: 'rgba(255, 159, 67, 0.22)' },
+  { name: 'Crash', icon: 'ti-sun', color: '#48dbfb', bg: 'rgba(72, 219, 251, 0.22)' },
+  { name: 'Bass', icon: 'ti-wave-sine', color: '#ff6b81', bg: 'rgba(255, 107, 129, 0.22)' },
+  { name: 'Chords', icon: 'ti-piano', color: '#71c89f', bg: 'rgba(113, 200, 159, 0.22)' },
+  { name: 'Melody', icon: 'ti-music', color: '#9a90ff', bg: 'rgba(154, 144, 255, 0.24)' },
+  { name: 'Lead', icon: 'ti-wand', color: '#9a90ff', bg: 'rgba(154, 144, 255, 0.24)' },
+  { name: 'Pluck', icon: 'ti-guitar-pick', color: '#9a90ff', bg: 'rgba(154, 144, 255, 0.24)' },
+  { name: 'Vox', icon: 'ti-microphone', color: '#1dd1a1', bg: 'rgba(29, 209, 161, 0.22)' },
+  { name: 'FX', icon: 'ti-bolt', color: '#ff9ff3', bg: 'rgba(255, 159, 243, 0.22)' },
+  { name: 'Other', icon: 'ti-dots', color: '#8a92a1', bg: 'rgba(138, 146, 161, 0.22)' },
 ];
 
 export const TagPickerPopover: React.FC<TagPickerPopoverProps> = ({
@@ -211,15 +212,15 @@ export const TagPickerPopover: React.FC<TagPickerPopoverProps> = ({
                 }
               }}
             >
-              {/* Color dot */}
-              <span
+              {/* Icon */}
+              <i
+                className={`ti ${t.icon}`}
                 style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: '50%',
-                  backgroundColor: t.color,
-                  boxShadow: isSelected ? `0 0 8px ${t.color}` : 'none',
+                  fontSize: 13,
+                  color: t.color,
                   flexShrink: 0,
+                  display: 'grid',
+                  placeItems: 'center',
                 }}
               />
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>

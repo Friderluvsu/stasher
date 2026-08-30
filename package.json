@@ -53,6 +53,10 @@
           "stasher-backend*",
           "*.exe"
         ]
+      },
+      {
+        "from": "public/audio/preview",
+        "to": "audio/preview"
       }
     ],
     "asar": true,

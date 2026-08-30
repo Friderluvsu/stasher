@@ -8,13 +8,25 @@ import { EditItemModal } from './EditItemModal';
 import { TagPickerPopover } from './TagPickerPopover';
 import { KitPickerPopover } from './KitPickerPopover';
 import { notify } from '../state/toastStore';
+import { dragService } from '../services/dragService';
 
 interface SoundCardProps {
   sound: SoundItem;
 }
 
 export const SoundCard: React.FC<SoundCardProps> = ({ sound }) => {
-  const { playSound, stopPlayback, currentlyPlayingId, isPlaying, updateItemTag } = useVaultStore();
+  const {
+    playSound,
+    stopPlayback,
+    currentlyPlayingId,
+    isPlaying,
+    updateItemTag,
+    kits,
+    activeKitId,
+    toggleKitSound,
+    selectedSoundIds,
+    toggleSelectSound,
+  } = useVaultStore();
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isKitMenuOpen, setIsKitMenuOpen] = useState(false);
   const [isTagMenuOpen, setIsTagMenuOpen] = useState(false);
@@ -22,11 +34,11 @@ export const SoundCard: React.FC<SoundCardProps> = ({ sound }) => {
   const tagBadgeRef = useRef<HTMLButtonElement>(null);
   const kitButtonRef = useRef<HTMLDivElement>(null);
 
-  const { kits, activeKitId, toggleKitSound } = useVaultStore();
   const language = useInterfaceStore((state) => state.language);
   const isRu = language === 'ru';
 
   const isCurrentPlaying = isPlaying && currentlyPlayingId === sound.id;
+  const isSelected = selectedSoundIds.includes(sound.id);
   const activeKit = kits.find((k) => k.id === activeKitId) || kits[0];
   const isInKit = activeKit ? activeKit.sounds.some((s) => s.id === sound.id) : false;
 
@@ -43,15 +55,25 @@ export const SoundCard: React.FC<SoundCardProps> = ({ sound }) => {
   })();
 
   const handleDragStart = (e: React.DragEvent) => {
-    (window as any).__stasher_is_internal_drag = true;
+    const ids = isSelected && selectedSoundIds.length > 0 ? selectedSoundIds : [sound.id];
+    dragService.startDrag({
+      type: 'sound',
+      id: sound.id,
+      ids,
+      tag: sound.tag,
+    });
+
     e.dataTransfer.setData('application/x-stasher-internal', 'true');
+    e.dataTransfer.setData('application/x-stasher-item-type', 'sound');
+    e.dataTransfer.setData('application/x-stasher-item-id', String(sound.id));
+    e.dataTransfer.setData('application/x-stasher-item-ids', JSON.stringify(ids));
+
     const audioUrl = api.getSoundAudioUrl(sound.id);
     const fileName = sound.sample_name || `${cleanTitle}.wav`;
     e.dataTransfer.setData('DownloadURL', `audio/wav:${fileName}:${audioUrl}`);
     e.dataTransfer.setData('text/plain', audioUrl);
 
     if ((window as any).electronAPI?.startDrag) {
-      e.preventDefault();
       (window as any).electronAPI.startDrag({
         type: 'sound',
         id: sound.id,
@@ -62,7 +84,7 @@ export const SoundCard: React.FC<SoundCardProps> = ({ sound }) => {
   };
 
   const handleDragEnd = () => {
-    (window as any).__stasher_is_internal_drag = false;
+    dragService.endDrag();
   };
 
   const getTagStyle = (tag: string) => {
@@ -98,13 +120,34 @@ export const SoundCard: React.FC<SoundCardProps> = ({ sound }) => {
       draggable
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
-      className={`glass-card spotlight-card sound-card p-3 px-4 flex items-center gap-3.5 cursor-grab ${
-        isCurrentPlaying ? 'border-[#9a90ff]/50 shadow-[0_0_24px_rgba(154,144,255,0.18)]' : ''
+      className={`glass-card spotlight-card sound-card p-3 px-4 flex items-center gap-3.5 cursor-grab transition-all ${
+        isSelected
+          ? 'border-[var(--accent)] bg-[rgba(154,144,255,0.12)] shadow-[0_0_24px_rgba(154,144,255,0.22)]'
+          : isCurrentPlaying
+          ? 'border-[#9a90ff]/50 shadow-[0_0_24px_rgba(154,144,255,0.18)]'
+          : ''
       }`}
       style={{
         borderRadius: 'var(--radius-card, 20px)',
       }}
     >
+      {/* Checkbox for batch selection */}
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          toggleSelectSound(sound.id);
+        }}
+        className={`w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 transition-all cursor-pointer ${
+          isSelected
+            ? 'bg-[var(--accent)] text-[#0e1017] shadow-sm'
+            : 'bg-white/5 border border-white/20 text-transparent hover:border-white/40'
+        }`}
+        title={isSelected ? (isRu ? 'Снять выделение' : 'Deselect') : (isRu ? 'Выбрать' : 'Select')}
+      >
+        <i className="ti ti-check text-xs font-bold" />
+      </button>
+
       {/* Drag grip handle */}
       <div className="text-[var(--soft)] opacity-40 hover:opacity-100 flex-shrink-0 cursor-grab transition-opacity" title="Drag to DAW">
         <i className="ti ti-grip-vertical text-lg" aria-hidden="true" />

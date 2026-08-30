@@ -10,6 +10,8 @@ import { KitPickerPopover } from './KitPickerPopover';
 import { notify } from '../state/toastStore';
 import { generateMidiBase64 } from '../utils/midiBuilder';
 
+import { dragService } from '../services/dragService';
+
 interface PatternCardProps {
   pattern: PatternItem;
 }
@@ -22,7 +24,18 @@ function getBarsLabel(bars: number, isRu: boolean): string {
 }
 
 export const PatternCard: React.FC<PatternCardProps> = ({ pattern }) => {
-  const { playPattern, stopPlayback, currentlyPlayingId, isPlaying, updateItemTag } = useVaultStore();
+  const {
+    playPattern,
+    stopPlayback,
+    currentlyPlayingId,
+    isPlaying,
+    updateItemTag,
+    kits,
+    activeKitId,
+    toggleKitPattern,
+    selectedPatternIds,
+    toggleSelectPattern,
+  } = useVaultStore();
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isKitMenuOpen, setIsKitMenuOpen] = useState(false);
   const [isTagMenuOpen, setIsTagMenuOpen] = useState(false);
@@ -30,24 +43,34 @@ export const PatternCard: React.FC<PatternCardProps> = ({ pattern }) => {
   const tagBadgeRef = useRef<HTMLButtonElement>(null);
   const kitButtonRef = useRef<HTMLDivElement>(null);
 
-  const { kits, activeKitId, toggleKitPattern } = useVaultStore();
   const language = useInterfaceStore((state) => state.language);
   const isRu = language === 'ru';
 
   const isCurrentPlaying = isPlaying && currentlyPlayingId === pattern.id;
+  const isSelected = selectedPatternIds.includes(pattern.id);
   const activeKit = kits.find((k) => k.id === activeKitId) || kits[0];
   const isInKit = activeKit ? activeKit.patterns.some((p) => p.id === pattern.id) : false;
 
   const handleDragStart = (e: React.DragEvent) => {
-    (window as any).__stasher_is_internal_drag = true;
+    const ids = isSelected && selectedPatternIds.length > 0 ? selectedPatternIds : [pattern.id];
+    dragService.startDrag({
+      type: 'pattern',
+      id: pattern.id,
+      ids,
+      tag: pattern.tag,
+    });
+
     e.dataTransfer.setData('application/x-stasher-internal', 'true');
+    e.dataTransfer.setData('application/x-stasher-item-type', 'pattern');
+    e.dataTransfer.setData('application/x-stasher-item-id', String(pattern.id));
+    e.dataTransfer.setData('application/x-stasher-item-ids', JSON.stringify(ids));
+
     const fileName = `${(pattern.pattern_name || 'pattern').replace(/[^a-zA-Z0-9_-]/g, '_')}_${pattern.tag}.mid`;
     const midiUrl = api.getMidiUrl(pattern.id);
     e.dataTransfer.setData('DownloadURL', `audio/midi:${fileName}:${midiUrl}`);
     e.dataTransfer.setData('text/plain', midiUrl);
 
     if ((window as any).electronAPI?.startDrag) {
-      e.preventDefault();
       try {
         const base64Data = generateMidiBase64(
           pattern.notes || [],
@@ -68,7 +91,7 @@ export const PatternCard: React.FC<PatternCardProps> = ({ pattern }) => {
   };
 
   const handleDragEnd = () => {
-    (window as any).__stasher_is_internal_drag = false;
+    dragService.endDrag();
   };
 
   const getTagStyle = (tag: string) => {
@@ -104,13 +127,34 @@ export const PatternCard: React.FC<PatternCardProps> = ({ pattern }) => {
       draggable
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
-      className={`glass-card spotlight-card pattern-card p-3 px-4 flex items-center gap-3.5 cursor-grab ${
-        isCurrentPlaying ? 'border-[#9a90ff]/50 shadow-[0_0_24px_rgba(154,144,255,0.18)]' : ''
+      className={`glass-card spotlight-card pattern-card p-3 px-4 flex items-center gap-3.5 cursor-grab transition-all ${
+        isSelected
+          ? 'border-[var(--accent)] bg-[rgba(154,144,255,0.12)] shadow-[0_0_24px_rgba(154,144,255,0.22)]'
+          : isCurrentPlaying
+          ? 'border-[#9a90ff]/50 shadow-[0_0_24px_rgba(154,144,255,0.18)]'
+          : ''
       }`}
       style={{
         borderRadius: 'var(--radius-card, 20px)',
       }}
     >
+      {/* Checkbox for batch selection */}
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          toggleSelectPattern(pattern.id);
+        }}
+        className={`w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 transition-all cursor-pointer ${
+          isSelected
+            ? 'bg-[var(--accent)] text-[#0e1017] shadow-sm'
+            : 'bg-white/5 border border-white/20 text-transparent hover:border-white/40'
+        }`}
+        title={isSelected ? (isRu ? 'Снять выделение' : 'Deselect') : (isRu ? 'Выбрать' : 'Select')}
+      >
+        <i className="ti ti-check text-xs font-bold" />
+      </button>
+
       {/* Drag grip handle */}
       <div className="text-[var(--soft)] opacity-40 hover:opacity-100 flex-shrink-0 cursor-grab transition-opacity" title="Drag to DAW">
         <i className="ti ti-grip-vertical text-lg" aria-hidden="true" />
@@ -181,9 +225,16 @@ export const PatternCard: React.FC<PatternCardProps> = ({ pattern }) => {
         </div>
       </div>
 
-      {/* Mini Piano Roll graphic */}
+      {/* Mini Piano Roll graphic with timeline seek & scrub */}
       <div className="flex-shrink-0">
-        <MiniPianoRoll notes={pattern.notes} tag={pattern.tag} isPlaying={isCurrentPlaying} />
+        <MiniPianoRoll
+          patternId={pattern.id}
+          notes={pattern.notes}
+          tempo={pattern.tempo}
+          ppq={pattern.ppq}
+          tag={pattern.tag}
+          isPlaying={isCurrentPlaying}
+        />
       </div>
 
       {/* Metadata */}

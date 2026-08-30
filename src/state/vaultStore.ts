@@ -45,6 +45,19 @@ interface VaultState {
   // Stacks (Multi-track mixer)
   masterTempo: number;
 
+  // Selection & Batch Operations
+  selectedSoundIds: number[];
+  selectedPatternIds: number[];
+  toggleSelectSound: (id: number) => void;
+  toggleSelectPattern: (id: number) => void;
+  selectAllSounds: (ids?: number[]) => void;
+  selectAllPatterns: (ids?: number[]) => void;
+  clearSelection: () => void;
+  batchDeleteSelected: () => Promise<void>;
+  batchUpdateTagSelected: (tag: string) => Promise<void>;
+  batchUpdateItemsTag: (type: 'sound' | 'pattern', ids: number[], tag: string) => Promise<void>;
+  batchAddSelectedToKit: (kitId?: string) => void;
+
   // Custom Sound Kit Builder
   kits: Kit[];
   activeKitId: string;
@@ -94,6 +107,9 @@ interface VaultState {
   uploadAndScan: (files: File[]) => Promise<void>;
   pollScanProgress: () => Promise<void>;
   seedDemoData: () => Promise<void>;
+  // Internal request sequence counters (race condition prevention)
+  _patternFetchSeq: number;
+  _soundFetchSeq: number;
 }
 
 export const useVaultStore = create<VaultState>((set, get) => {
@@ -130,6 +146,187 @@ export const useVaultStore = create<VaultState>((set, get) => {
 
     masterTempo: 140,
 
+    selectedSoundIds: [],
+    selectedPatternIds: [],
+
+    toggleSelectSound: (id) => {
+      const { selectedSoundIds } = get();
+      if (selectedSoundIds.includes(id)) {
+        set({ selectedSoundIds: selectedSoundIds.filter((x) => x !== id) });
+      } else {
+        set({ selectedSoundIds: [...selectedSoundIds, id] });
+      }
+    },
+
+    toggleSelectPattern: (id) => {
+      const { selectedPatternIds } = get();
+      if (selectedPatternIds.includes(id)) {
+        set({ selectedPatternIds: selectedPatternIds.filter((x) => x !== id) });
+      } else {
+        set({ selectedPatternIds: [...selectedPatternIds, id] });
+      }
+    },
+
+    selectAllSounds: (ids) => {
+      const allIds = ids || get().sounds.map((s) => s.id);
+      const { selectedSoundIds } = get();
+      if (selectedSoundIds.length === allIds.length && allIds.length > 0) {
+        set({ selectedSoundIds: [] });
+      } else {
+        set({ selectedSoundIds: allIds });
+      }
+    },
+
+    selectAllPatterns: (ids) => {
+      const allIds = ids || get().patterns.map((p) => p.id);
+      const { selectedPatternIds } = get();
+      if (selectedPatternIds.length === allIds.length && allIds.length > 0) {
+        set({ selectedPatternIds: [] });
+      } else {
+        set({ selectedPatternIds: allIds });
+      }
+    },
+
+    clearSelection: () => {
+      set({ selectedSoundIds: [], selectedPatternIds: [] });
+    },
+
+    batchDeleteSelected: async () => {
+      const { activeTab, selectedSoundIds, selectedPatternIds } = get();
+      if (activeTab === 'sounds' && selectedSoundIds.length > 0) {
+        const idsToDelete = [...selectedSoundIds];
+        set({ selectedSoundIds: [] });
+        await api.deleteSoundsBatch(idsToDelete);
+        await get().fetchSounds();
+      } else if (activeTab === 'midi' && selectedPatternIds.length > 0) {
+        const idsToDelete = [...selectedPatternIds];
+        set({ selectedPatternIds: [] });
+        await api.deletePatternsBatch(idsToDelete);
+        await get().fetchPatterns();
+      }
+    },
+
+    batchUpdateTagSelected: async (tag: string) => {
+      const { activeTab, selectedSoundIds, selectedPatternIds } = get();
+      if (activeTab === 'sounds' && selectedSoundIds.length > 0) {
+        const ids = [...selectedSoundIds];
+        set({ selectedSoundIds: [] });
+        await get().batchUpdateItemsTag('sound', ids, tag);
+      } else if (activeTab === 'midi' && selectedPatternIds.length > 0) {
+        const ids = [...selectedPatternIds];
+        set({ selectedPatternIds: [] });
+        await get().batchUpdateItemsTag('pattern', ids, tag);
+      }
+    },
+
+    batchUpdateItemsTag: async (type: 'sound' | 'pattern', ids: number[], tag: string) => {
+      if (!ids || ids.length === 0 || !tag) return;
+      const numIds = ids.map(Number).filter((n) => Number.isInteger(n) && n > 0);
+      if (numIds.length === 0) return;
+
+      if (type === 'sound') {
+        const currentSounds = get().sounds;
+        const currentTagCounts = { ...get().soundTagCounts };
+
+        // Optimistically recalculate counts
+        for (const id of numIds) {
+          const oldItem = currentSounds.find((s) => s.id === id);
+          if (oldItem && oldItem.tag !== tag) {
+            if (oldItem.tag && currentTagCounts[oldItem.tag]) {
+              currentTagCounts[oldItem.tag] = Math.max(0, currentTagCounts[oldItem.tag] - 1);
+            }
+            currentTagCounts[tag] = (currentTagCounts[tag] || 0) + 1;
+          }
+        }
+
+        const updatedSounds = currentSounds.map((s) => (numIds.includes(s.id) ? { ...s, tag } : s));
+
+        set({
+          sounds: updatedSounds,
+          soundTagCounts: currentTagCounts,
+          kits: get().kits.map((k) => ({
+            ...k,
+            sounds: k.sounds.map((s) => (numIds.includes(s.id) ? { ...s, tag } : s)),
+          })),
+        });
+
+        try {
+          await api.updateSoundsTagBatch(numIds, tag);
+        } catch (err) {
+          console.warn('Batch sounds tag failed, updating individually:', err);
+          for (const id of numIds) {
+            const s = currentSounds.find((item) => item.id === id);
+            const name = s?.sample_name || s?.channel_name || 'Sound';
+            await api.updateSound(id, name, tag).catch(() => {});
+          }
+        }
+        await get().fetchSounds();
+      } else {
+        const currentPatterns = get().patterns;
+        const currentTagCounts = { ...get().patternTagCounts };
+
+        // Optimistically recalculate counts
+        for (const id of numIds) {
+          const oldItem = currentPatterns.find((p) => p.id === id);
+          if (oldItem && oldItem.tag !== tag) {
+            if (oldItem.tag && currentTagCounts[oldItem.tag]) {
+              currentTagCounts[oldItem.tag] = Math.max(0, currentTagCounts[oldItem.tag] - 1);
+            }
+            currentTagCounts[tag] = (currentTagCounts[tag] || 0) + 1;
+          }
+        }
+
+        const updatedPatterns = currentPatterns.map((p) => (numIds.includes(p.id) ? { ...p, tag } : p));
+
+        set({
+          patterns: updatedPatterns,
+          patternTagCounts: currentTagCounts,
+          kits: get().kits.map((k) => ({
+            ...k,
+            patterns: k.patterns.map((p) => (numIds.includes(p.id) ? { ...p, tag } : p)),
+          })),
+        });
+
+        try {
+          await api.updatePatternsTagBatch(numIds, tag);
+        } catch (err) {
+          console.warn('Batch patterns tag failed, updating individually:', err);
+          for (const id of numIds) {
+            const p = currentPatterns.find((item) => item.id === id);
+            const name = p?.pattern_name || p?.channel_name || 'Pattern';
+            await api.updatePattern(id, name, tag).catch(() => {});
+          }
+        }
+        await get().fetchPatterns();
+      }
+    },
+
+    batchAddSelectedToKit: (kitId?: string) => {
+      const { activeTab, selectedSoundIds, selectedPatternIds, sounds, patterns } = get();
+      const targetId = kitId || get().activeKitId;
+
+      if (activeTab === 'sounds' && selectedSoundIds.length > 0) {
+        const selectedSounds = sounds.filter((s) => selectedSoundIds.includes(s.id));
+        set({
+          kits: get().kits.map((k) => {
+            if (k.id !== targetId) return k;
+            const existingIds = new Set(k.sounds.map((s) => s.id));
+            const newSounds = selectedSounds.filter((s) => !existingIds.has(s.id));
+            return { ...k, sounds: [...k.sounds, ...newSounds] };
+          }),
+        });
+      } else if (activeTab === 'midi' && selectedPatternIds.length > 0) {
+        const selectedPatterns = patterns.filter((p) => selectedPatternIds.includes(p.id));
+        set({
+          kits: get().kits.map((k) => {
+            if (k.id !== targetId) return k;
+            const existingIds = new Set(k.patterns.map((p) => p.id));
+            const newPatterns = selectedPatterns.filter((p) => !existingIds.has(p.id));
+            return { ...k, patterns: [...k.patterns, ...newPatterns] };
+          }),
+        });
+      }
+    },
 
     kits: [{ id: 'default', name: 'My_StashSound_Kit', sounds: [], patterns: [] }],
     activeKitId: 'default',
@@ -227,56 +424,50 @@ export const useVaultStore = create<VaultState>((set, get) => {
 
     updateItemInStore: (type, id, name, tag) => {
       if (type === 'sound') {
+        const currentSounds = get().sounds;
+        const currentTagCounts = { ...get().soundTagCounts };
+        const oldItem = currentSounds.find((s) => s.id === id);
+        if (oldItem && oldItem.tag !== tag) {
+          if (oldItem.tag && currentTagCounts[oldItem.tag]) {
+            currentTagCounts[oldItem.tag] = Math.max(0, currentTagCounts[oldItem.tag] - 1);
+          }
+          currentTagCounts[tag] = (currentTagCounts[tag] || 0) + 1;
+        }
+
         set({
           sounds: get().sounds.map(s => s.id === id ? { ...s, sample_name: name, tag } : s),
+          soundTagCounts: currentTagCounts,
           kits: get().kits.map(k => ({
             ...k,
             sounds: k.sounds.map(s => s.id === id ? { ...s, sample_name: name, tag } : s)
           }))
         });
+        get().fetchSounds();
       } else {
+        const currentPatterns = get().patterns;
+        const currentTagCounts = { ...get().patternTagCounts };
+        const oldItem = currentPatterns.find((p) => p.id === id);
+        if (oldItem && oldItem.tag !== tag) {
+          if (oldItem.tag && currentTagCounts[oldItem.tag]) {
+            currentTagCounts[oldItem.tag] = Math.max(0, currentTagCounts[oldItem.tag] - 1);
+          }
+          currentTagCounts[tag] = (currentTagCounts[tag] || 0) + 1;
+        }
+
         set({
           patterns: get().patterns.map(p => p.id === id ? { ...p, pattern_name: name, tag } : p),
+          patternTagCounts: currentTagCounts,
           kits: get().kits.map(k => ({
             ...k,
             patterns: k.patterns.map(p => p.id === id ? { ...p, pattern_name: name, tag } : p)
           }))
         });
+        get().fetchPatterns();
       }
     },
 
     updateItemTag: async (type, id, tag) => {
-      if (type === 'sound') {
-        const item = get().sounds.find(s => s.id === id);
-        const currentName = item?.sample_name || item?.channel_name || 'Sound';
-        set({
-          sounds: get().sounds.map(s => s.id === id ? { ...s, tag } : s),
-          kits: get().kits.map(k => ({
-            ...k,
-            sounds: k.sounds.map(s => s.id === id ? { ...s, tag } : s)
-          }))
-        });
-        try {
-          await api.updateSound(id, currentName, tag);
-        } catch (err) {
-          console.error('Failed to update sound tag on server:', err);
-        }
-      } else {
-        const item = get().patterns.find(p => p.id === id);
-        const currentName = item?.pattern_name || 'Pattern';
-        set({
-          patterns: get().patterns.map(p => p.id === id ? { ...p, tag } : p),
-          kits: get().kits.map(k => ({
-            ...k,
-            patterns: k.patterns.map(p => p.id === id ? { ...p, tag } : p)
-          }))
-        });
-        try {
-          await api.updatePattern(id, currentName, tag);
-        } catch (err) {
-          console.error('Failed to update pattern tag on server:', err);
-        }
-      }
+      return get().batchUpdateItemsTag(type, [id], tag);
     },
 
 
@@ -288,7 +479,14 @@ export const useVaultStore = create<VaultState>((set, get) => {
       successful: 0
     },
 
+    // Sequence counters to cancel stale in-flight requests
+    _patternFetchSeq: 0,
+    _soundFetchSeq: 0,
+
     fetchPatterns: async () => {
+      const seq = get()._patternFetchSeq + 1;
+      set({ _patternFetchSeq: seq });
+
       const { selectedTag, searchQuery, minBpm, maxBpm, selectedProjectId } = get();
       try {
         const res = await api.fetchPatterns({
@@ -299,17 +497,23 @@ export const useVaultStore = create<VaultState>((set, get) => {
           project_id: selectedProjectId || undefined,
           limit: 200
         });
-        set({
-          patterns: res.items,
-          totalPatterns: res.total,
-          patternTagCounts: res.tag_counts
-        });
+        // Only apply if this is still the latest request
+        if (get()._patternFetchSeq === seq) {
+          set({
+            patterns: res.items,
+            totalPatterns: res.total,
+            patternTagCounts: res.tag_counts
+          });
+        }
       } catch (err) {
         console.error('Failed to load patterns:', err);
       }
     },
 
     fetchSounds: async () => {
+      const seq = get()._soundFetchSeq + 1;
+      set({ _soundFetchSeq: seq });
+
       const { selectedTag, searchQuery, selectedProjectId } = get();
       try {
         const res = await api.fetchSounds({
@@ -318,11 +522,14 @@ export const useVaultStore = create<VaultState>((set, get) => {
           project_id: selectedProjectId || undefined,
           limit: 200
         });
-        set({
-          sounds: res.items,
-          totalSounds: res.total,
-          soundTagCounts: res.tag_counts
-        });
+        // Only apply if this is still the latest request
+        if (get()._soundFetchSeq === seq) {
+          set({
+            sounds: res.items,
+            totalSounds: res.total,
+            soundTagCounts: res.tag_counts
+          });
+        }
       } catch (err) {
         console.error('Failed to load sounds:', err);
       }
@@ -354,10 +561,14 @@ export const useVaultStore = create<VaultState>((set, get) => {
     },
 
     setSelectedTag: (tag) => {
-      set({ selectedTag: tag });
       const { activeTab } = get();
-      if (activeTab === 'sounds') get().fetchSounds();
-      else get().fetchPatterns();
+      if (activeTab === 'sounds') {
+        set({ selectedTag: tag, sounds: [], totalSounds: 0 });
+        get().fetchSounds();
+      } else {
+        set({ selectedTag: tag, patterns: [], totalPatterns: 0 });
+        get().fetchPatterns();
+      }
     },
 
     setSearchQuery: (query) => {
@@ -373,10 +584,14 @@ export const useVaultStore = create<VaultState>((set, get) => {
     },
 
     setSelectedProjectId: (id) => {
-      set({ selectedProjectId: id });
       const { activeTab } = get();
-      if (activeTab === 'sounds') get().fetchSounds();
-      else get().fetchPatterns();
+      if (activeTab === 'sounds') {
+        set({ selectedProjectId: id, sounds: [], totalSounds: 0 });
+        get().fetchSounds();
+      } else {
+        set({ selectedProjectId: id, patterns: [], totalPatterns: 0 });
+        get().fetchPatterns();
+      }
     },
 
     playPattern: (pattern) => {

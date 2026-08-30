@@ -120,5 +120,81 @@ class TestStasherPipeline(unittest.TestCase):
         self.assertIsNotNone(midi_data)
         self.assertTrue(midi_data.startswith(b"MThd"))
 
+    def test_batch_operations(self):
+        from backend.core.database import delete_sounds, delete_patterns, update_sounds_tag, update_patterns_tag
+        
+        test_project = {
+            "file_path": "/Test/Projects/Batch_Test_Project.flp",
+            "file_name": "Batch_Test_Project.flp",
+            "title": "Batch Test",
+            "tempo": 140.0,
+            "ppq": 96,
+            "channel_count": 3,
+            "pattern_count": 2,
+            "file_size": 2048,
+            "channels": [
+                {"index": 0, "name": "Batch Sample 1", "sample_path": "/path/s1.wav", "generator": "Sampler"},
+                {"index": 1, "name": "Batch Sample 2", "sample_path": "/path/s2.wav", "generator": "Sampler"},
+            ],
+            "patterns": [
+                {
+                    "pattern_index": 0,
+                    "pattern_name": "Pattern A",
+                    "channel_index": 0,
+                    "channel_name": "Batch Sample 1",
+                    "tag": "Kick",
+                    "bars": 2,
+                    "key": "C",
+                    "note_count": 4,
+                    "tempo": 140.0,
+                    "ppq": 96,
+                    "notes": [],
+                    "midi_bytes": create_midi_bytes([])
+                },
+                {
+                    "pattern_index": 1,
+                    "pattern_name": "Pattern B",
+                    "channel_index": 1,
+                    "channel_name": "Batch Sample 2",
+                    "tag": "Snare",
+                    "bars": 2,
+                    "key": "C",
+                    "note_count": 4,
+                    "tempo": 140.0,
+                    "ppq": 96,
+                    "notes": [],
+                    "midi_bytes": create_midi_bytes([])
+                }
+            ]
+        }
+        project_id = save_project(test_project)
+        pats = query_patterns(project_id=project_id)["items"]
+        snds = query_sounds(project_id=project_id)["items"]
+        
+        pat_ids = [p["id"] for p in pats]
+        snd_ids = [s["id"] for s in snds]
+        
+        # Test batch tag update
+        update_patterns_tag(pat_ids, "808")
+        update_sounds_tag(snd_ids, "808")
+        
+        updated_pats = query_patterns(project_id=project_id)["items"]
+        for p in updated_pats:
+            self.assertEqual(p["tag"], "808")
+            
+        updated_snds = query_sounds(project_id=project_id)["items"]
+        for s in updated_snds:
+            self.assertEqual(s["tag"], "808")
+            
+        # Test batch delete
+        delete_patterns(pat_ids)
+        delete_sounds(snd_ids)
+        
+        after_pats = query_patterns(project_id=project_id)["items"]
+        after_snds = query_sounds(project_id=project_id)["items"]
+        self.assertEqual(len(after_pats), 0)
+        self.assertEqual(len(after_snds), 0)
+
 if __name__ == "__main__":
     unittest.main()
+

@@ -179,6 +179,46 @@ export const api = {
     return res.json();
   },
 
+  async deleteSoundsBatch(ids: number[]) {
+    const res = await fetch(`${API_BASE}/sounds/batch`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids })
+    });
+    if (!res.ok) throw new Error('Failed to delete sounds');
+    return res.json();
+  },
+
+  async deletePatternsBatch(ids: number[]) {
+    const res = await fetch(`${API_BASE}/patterns/batch`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids })
+    });
+    if (!res.ok) throw new Error('Failed to delete patterns');
+    return res.json();
+  },
+
+  async updateSoundsTagBatch(ids: number[], tag: string) {
+    const res = await fetch(`${API_BASE}/sounds/batch-tag`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids, tag })
+    });
+    if (!res.ok) throw new Error('Failed to update sounds tag');
+    return res.json();
+  },
+
+  async updatePatternsTagBatch(ids: number[], tag: string) {
+    const res = await fetch(`${API_BASE}/patterns/batch-tag`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids, tag })
+    });
+    if (!res.ok) throw new Error('Failed to update patterns tag');
+    return res.json();
+  },
+
   async exportKit(request: KitExportRequest): Promise<Blob> {
     const res = await fetch(`${API_BASE}/kits/export`, {
       method: 'POST',
