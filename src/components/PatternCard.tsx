@@ -71,6 +71,7 @@ export const PatternCard: React.FC<PatternCardProps> = ({ pattern }) => {
     e.dataTransfer.setData('text/plain', midiUrl);
 
     if ((window as any).electronAPI?.startDrag) {
+      e.preventDefault();
       try {
         const base64Data = generateMidiBase64(
           pattern.notes || [],

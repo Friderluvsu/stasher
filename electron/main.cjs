@@ -157,8 +157,42 @@ function createWindow() {
   }
 }
 
-// ─── Native Drag-to-DAW ────────────────────────────────
-ipcMain.on('ondragstart', (event, { type = 'midi', id, patternId, fileName, base64Data, samplePath }) => {
+// Helper to create a valid minimal PCM WAV synchronously if sample is offline/missing
+function createFallbackWav(filePath) {
+  const sampleRate = 44100;
+  const numChannels = 1;
+  const bitsPerSample = 16;
+  const numSamples = Math.floor(sampleRate * 0.4);
+  const blockAlign = numChannels * (bitsPerSample / 8);
+  const byteRate = sampleRate * blockAlign;
+  const dataSize = numSamples * blockAlign;
+  const buffer = Buffer.alloc(44 + dataSize);
+
+  buffer.write('RIFF', 0);
+  buffer.writeUInt32LE(36 + dataSize, 4);
+  buffer.write('WAVE', 8);
+  buffer.write('fmt ', 12);
+  buffer.writeUInt32LE(16, 16);
+  buffer.writeUInt16LE(1, 20); // PCM
+  buffer.writeUInt16LE(numChannels, 22);
+  buffer.writeUInt32LE(sampleRate, 24);
+  buffer.writeUInt32LE(byteRate, 28);
+  buffer.writeUInt16LE(blockAlign, 32);
+  buffer.writeUInt16LE(bitsPerSample, 34);
+  buffer.write('data', 36);
+  buffer.writeUInt32LE(dataSize, 40);
+
+  for (let i = 0; i < numSamples; i++) {
+    const t = i / sampleRate;
+    const val = Math.sin(2 * Math.PI * 150 * t) * Math.exp(-t * 15) * 16000;
+    buffer.writeInt16LE(Math.max(-32768, Math.min(32767, Math.floor(val))), 44 + i * 2);
+  }
+
+  fs.writeFileSync(filePath, buffer);
+}
+
+// ─── Native Drag-to-DAW (100% Synchronous) ─────────────
+ipcMain.on('ondragstart', (event, { type = 'midi', id, patternId, fileName, base64Data, samplePath, tag = '' }) => {
   ensureTempDir();
   const itemId = id || patternId;
   const isSound = type === 'sound';
@@ -166,57 +200,124 @@ ipcMain.on('ondragstart', (event, { type = 'midi', id, patternId, fileName, base
   const safeName = (fileName || `stash_${itemId}${ext}`).replace(/[^a-zA-Z0-9._-]/g, '_');
   const filePath = path.join(TEMP_DRAG_DIR, safeName);
 
-  const iconPath = path.join(__dirname, '..', 'icons', 'midi_icon.png');
+  // Load a valid non-empty drag icon for macOS / Windows
   let icon = nativeImage.createEmpty();
-  if (fs.existsSync(iconPath)) {
+  const candidateIconPaths = [
+    path.join(__dirname, '..', 'icons', 'midi_icon.png'),
+    path.join(__dirname, '..', 'icons', 'icon.png'),
+    path.join(process.resourcesPath, 'icons', 'midi_icon.png'),
+    path.join(process.resourcesPath, 'icons', 'icon.png'),
+  ];
+  for (const ic of candidateIconPaths) {
+    if (fs.existsSync(ic)) {
+      try {
+        const loaded = nativeImage.createFromPath(ic);
+        if (!loaded.isEmpty()) {
+          icon = loaded.resize({ width: 32, height: 32 });
+          break;
+        }
+      } catch {}
+    }
+  }
+
+  // Fallback 16x16 valid PNG buffer if icon was empty to prevent Cocoa crash
+  if (icon.isEmpty()) {
     try {
-      icon = nativeImage.createFromPath(iconPath);
+      icon = nativeImage.createFromBuffer(
+        Buffer.from('iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAAcSURBVDhPY/wPBAwUACYGhgFgwKjBoAYYNRhoAABK4QYBgv7qWQAAAABJRU5ErkJggg==', 'base64')
+      );
     } catch {}
   }
 
-  // 1. Instant Synchronous Drag for MIDI from base64 memory buffer
-  if (base64Data) {
-    try {
-      fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
-      event.sender.startDrag({ file: filePath, icon });
-      return;
-    } catch (err) {
-      console.error('Error writing base64 drag file:', err);
-    }
-  }
+  let finalDragFile = filePath;
 
-  // 2. Instant Synchronous Drag for audio sample if file is on local disk
-  if (samplePath && fs.existsSync(samplePath) && fs.statSync(samplePath).isFile()) {
-    try {
-      event.sender.startDrag({ file: samplePath, icon });
-      return;
-    } catch (err) {
-      console.error('Error starting direct sample drag:', err);
-    }
-  }
-
-  // 3. Fallback: stream from local API
-  const endpoint = isSound
-    ? `http://127.0.0.1:8765/api/sounds/${itemId}/audio`
-    : `http://127.0.0.1:8765/api/patterns/${itemId}/midi`;
-
-  const file = fs.createWriteStream(filePath);
-  http.get(endpoint, (response) => {
-    if (response.statusCode === 200) {
-      response.pipe(file);
-      file.on('finish', () => {
-        file.close(() => {
-          try {
-            event.sender.startDrag({ file: filePath, icon });
-          } catch (err) {
-            console.error('startDrag error:', err);
-          }
-        });
-      });
+  if (isSound) {
+    // 1. If physical sample file exists on disk, use it directly
+    if (samplePath && fs.existsSync(samplePath) && fs.statSync(samplePath).isFile()) {
+      finalDragFile = samplePath;
     } else {
-      file.close();
+      // 2. Try to find matched preview WAV sample in app resources / public folder
+      const tagLower = (tag || '').toLowerCase();
+      const previewMap = {
+        '808': '808.wav',
+        'bass': '808.wav',
+        'kick': 'kick.wav',
+        'snare': 'snare.wav',
+        'clap': 'clap.wav',
+        'hi-hat': 'hihat.wav',
+        'open hat': 'openhat.wav',
+        'rim': 'rim.wav',
+        'perc': 'perc.wav',
+        'vox': 'vox.wav',
+        'fx': 'fx.wav',
+        'piano': 'piano.wav',
+        'chords': 'piano.wav',
+        'melody': 'piano.wav',
+      };
+      const candidatePreviewName = previewMap[tagLower] || `${tagLower}.wav`;
+
+      const candidateDirs = [
+        path.join(__dirname, '..', 'public', 'audio', 'preview'),
+        path.join(__dirname, '..', 'dist', 'audio', 'preview'),
+        path.join(process.resourcesPath, 'audio', 'preview'),
+        path.join(process.resourcesPath, 'public', 'audio', 'preview'),
+      ];
+
+      let foundPreview = null;
+      for (const d of candidateDirs) {
+        const p1 = path.join(d, candidatePreviewName);
+        if (fs.existsSync(p1) && fs.statSync(p1).isFile()) {
+          foundPreview = p1;
+          break;
+        }
+        if (fileName) {
+          const p2 = path.join(d, fileName);
+          if (fs.existsSync(p2) && fs.statSync(p2).isFile()) {
+            foundPreview = p2;
+            break;
+          }
+        }
+      }
+
+      if (foundPreview) {
+        try {
+          fs.copyFileSync(foundPreview, filePath);
+          finalDragFile = filePath;
+        } catch {
+          finalDragFile = foundPreview;
+        }
+      } else {
+        // 3. Generate fallback WAV synchronously
+        try {
+          createFallbackWav(filePath);
+          finalDragFile = filePath;
+        } catch (e) {
+          console.error('Error generating fallback WAV for drag:', e);
+        }
+      }
     }
-  }).on('error', (err) => console.error('Drag audio/MIDI error:', err));
+  } else {
+    // MIDI pattern drag: write synchronously from base64 buffer
+    if (base64Data) {
+      try {
+        fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
+        finalDragFile = filePath;
+      } catch (err) {
+        console.error('Error writing base64 drag file:', err);
+      }
+    }
+  }
+
+  // Synchronously start drag session on OS level (FL Studio / Ableton / Finder)
+  try {
+    if (fs.existsSync(finalDragFile)) {
+      event.sender.startDrag({ file: finalDragFile, icon });
+    } else {
+      console.warn('[Stasher] Drag file does not exist on disk:', finalDragFile);
+    }
+  } catch (err) {
+    console.error('[Stasher] Electron startDrag failed:', err);
+  }
 });
 
 // ─── App lifecycle ─────────────────────────────────────

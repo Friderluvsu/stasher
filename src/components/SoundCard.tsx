@@ -74,11 +74,13 @@ export const SoundCard: React.FC<SoundCardProps> = ({ sound }) => {
     e.dataTransfer.setData('text/plain', audioUrl);
 
     if ((window as any).electronAPI?.startDrag) {
+      e.preventDefault();
       (window as any).electronAPI.startDrag({
         type: 'sound',
         id: sound.id,
         fileName,
         samplePath: sound.sample_path,
+        tag: sound.tag,
       });
     }
   };

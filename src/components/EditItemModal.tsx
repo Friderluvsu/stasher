@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import ReactDOM from 'react-dom';
 import { api } from '../services/api';
 import { useVaultStore } from '../state/vaultStore';
 import { useInterfaceStore } from '../state/interfaceStore';
@@ -73,8 +74,21 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
     }
   };
 
-  return (
-    <div className="confirm-overlay" onClick={onClose}>
+  return ReactDOM.createPortal(
+    <div
+      className="confirm-overlay"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 999999,
+        display: 'grid',
+        placeItems: 'center',
+        background: 'rgba(0, 0, 0, 0.7)',
+        backdropFilter: 'blur(16px)',
+        WebkitBackdropFilter: 'blur(16px)',
+      }}
+      onClick={onClose}
+    >
       <div 
         className="glass-popover confirm-dialog"
         style={{
@@ -83,6 +97,11 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
           borderRadius: 24,
           textAlign: 'left',
           justifyItems: 'stretch',
+          position: 'relative',
+          zIndex: 1000000,
+          background: '#161b26',
+          border: '1px solid rgba(255, 255, 255, 0.16)',
+          boxShadow: '0 24px 60px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.1)',
         }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -197,6 +216,7 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
