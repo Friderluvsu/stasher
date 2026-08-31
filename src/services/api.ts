@@ -219,6 +219,40 @@ export const api = {
     return res.json();
   },
 
+  async getKits(): Promise<{ kits: Array<{ id: string; name: string; sounds: SoundItem[]; patterns: PatternItem[] }>; active_kit_id: string }> {
+    const res = await fetch(`${API_BASE}/kits`);
+    if (!res.ok) throw new Error('Failed to fetch kits');
+    return res.json();
+  },
+
+  async saveKit(kit: { id: string; name: string; sound_ids: number[]; pattern_ids: number[] }) {
+    const res = await fetch(`${API_BASE}/kits`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(kit),
+    });
+    if (!res.ok) throw new Error('Failed to save kit');
+    return res.json();
+  },
+
+  async deleteKit(kitId: string) {
+    const res = await fetch(`${API_BASE}/kits/${kitId}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok) throw new Error('Failed to delete kit');
+    return res.json();
+  },
+
+  async setActiveKit(activeKitId: string) {
+    const res = await fetch(`${API_BASE}/kits/active`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active_kit_id: activeKitId }),
+    });
+    if (!res.ok) throw new Error('Failed to set active kit');
+    return res.json();
+  },
+
   async exportKit(request: KitExportRequest): Promise<Blob> {
     const res = await fetch(`${API_BASE}/kits/export`, {
       method: 'POST',

@@ -108,6 +108,26 @@ def init_db():
     )
     """)
 
+    # 5. Kits table (Kit Builder persistence)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS kits (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        sound_ids TEXT,
+        pattern_ids TEXT,
+        created_at INTEGER,
+        updated_at INTEGER
+    )
+    """)
+
+    # 6. App Settings table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT
+    )
+    """)
+
     # Indexes
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_patterns_tag ON patterns(tag)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_patterns_project ON patterns(project_id)")
@@ -493,6 +513,34 @@ def get_sound_by_id(sound_id: int) -> Optional[Dict[str, Any]]:
     conn.close()
     return dict(row) if row else None
 
+def _generate_fallback_wav_bytes(tag: str = "") -> bytes:
+    """Generate minimal valid PCM WAV bytes if physical audio sample is missing."""
+    import struct, math
+    sample_rate = 44100
+    duration = 0.4
+    freq = 65.0 if tag.lower() in ["808", "bass"] else (150.0 if tag.lower() == "kick" else 350.0)
+    num_samples = int(sample_rate * duration)
+    data = bytearray()
+    for i in range(num_samples):
+        t = i / sample_rate
+        val = math.sin(2 * math.pi * freq * t) * math.exp(-t * 15) * 16000
+        sample = max(-32768, min(32767, int(val)))
+        data.extend(struct.pack('<h', sample))
+    
+    header = bytearray(b'RIFF')
+    header.extend(struct.pack('<I', 36 + len(data)))
+    header.extend(b'WAVEfmt ')
+    header.extend(struct.pack('<I', 16))
+    header.extend(struct.pack('<H', 1))  # PCM
+    header.extend(struct.pack('<H', 1))  # Mono
+    header.extend(struct.pack('<I', sample_rate))
+    header.extend(struct.pack('<I', sample_rate * 2))
+    header.extend(struct.pack('<H', 2))
+    header.extend(struct.pack('<H', 16))
+    header.extend(b'data')
+    header.extend(struct.pack('<I', len(data)))
+    return bytes(header + data)
+
 def export_sound_kit_zip(
     kit_name: str,
     sound_ids: List[int],
@@ -501,12 +549,16 @@ def export_sound_kit_zip(
     """
     Creates an organized .zip drum kit / sound pack containing the selected sounds and MIDIs.
     Folders:
-      - 808s/
-      - Kicks/
-      - Snares & Claps/
-      - Hi-Hats/
-      - Percs & FX/
+      - Sounds/
+        - 808s & Bass/
+        - Kicks/
+        - Snares & Claps/
+        - Hi-Hats & Cymbals/
+        - Percs & FX/
+        - Instruments & Vox/
       - MIDIs/
+        - Melodies & Chords/
+        - Drums/
     """
     conn = get_connection()
     cursor = conn.cursor()
@@ -514,33 +566,73 @@ def export_sound_kit_zip(
     safe_kit_name = "".join(c for c in kit_name if c.isalnum() or c in " _-").strip() or "StashSound_Kit"
     zip_buffer = io.BytesIO()
 
+    # Pre-check bundled preview audio directory
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    preview_dir = os.path.join(base_dir, "public", "audio", "preview")
+
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        # 1. Add sounds
+        used_paths = set()
+
+        # 1. Add sounds (grouped into subfolders)
         if sound_ids:
             placeholders = ",".join(["?"] * len(sound_ids))
             cursor.execute(f"SELECT * FROM sounds WHERE id IN ({placeholders})", sound_ids)
             for row in cursor.fetchall():
                 sound = dict(row)
                 tag = sound.get("tag", "Other")
+                tag_norm = normalize_tag(tag)
                 
-                # Determine folder
-                if tag in ["808", "Bass"]:
-                    folder = f"{safe_kit_name}/808s & Bass"
-                elif tag == "Kick":
-                    folder = f"{safe_kit_name}/Kicks"
-                elif tag in ["Snare", "Clap", "Rim"]:
-                    folder = f"{safe_kit_name}/Snares & Claps"
-                elif tag in ["Hi-Hat", "Open Hat"]:
-                    folder = f"{safe_kit_name}/Hi-Hats"
-                elif tag in ["Perc", "Vox", "FX"]:
-                    folder = f"{safe_kit_name}/Percs & FX"
+                # Determine granular subfolder
+                if tag_norm == "808":
+                    folder = f"{safe_kit_name}/Sounds/1. Drums & One-Shots/808s"
+                elif tag_norm == "Bass":
+                    folder = f"{safe_kit_name}/Sounds/1. Drums & One-Shots/Basses"
+                elif tag_norm == "Kick":
+                    folder = f"{safe_kit_name}/Sounds/1. Drums & One-Shots/Kicks"
+                elif tag_norm == "Snare":
+                    folder = f"{safe_kit_name}/Sounds/1. Drums & One-Shots/Snares"
+                elif tag_norm == "Clap":
+                    folder = f"{safe_kit_name}/Sounds/1. Drums & One-Shots/Claps"
+                elif tag_norm == "Rim":
+                    folder = f"{safe_kit_name}/Sounds/1. Drums & One-Shots/Rims"
+                elif tag_norm == "Hi-Hat":
+                    folder = f"{safe_kit_name}/Sounds/1. Drums & One-Shots/Hi-Hats (Closed)"
+                elif tag_norm == "Open Hat":
+                    folder = f"{safe_kit_name}/Sounds/1. Drums & One-Shots/Open Hats"
+                elif tag_norm == "Crash":
+                    folder = f"{safe_kit_name}/Sounds/1. Drums & One-Shots/Crashes & Cymbals"
+                elif tag_norm == "Perc":
+                    folder = f"{safe_kit_name}/Sounds/1. Drums & One-Shots/Percs"
+                elif tag_norm == "Tom":
+                    folder = f"{safe_kit_name}/Sounds/1. Drums & One-Shots/Toms"
+                elif tag_norm == "Vox":
+                    folder = f"{safe_kit_name}/Sounds/2. Vocals & Chants/Vox"
+                elif tag_norm == "FX":
+                    folder = f"{safe_kit_name}/Sounds/3. FX & Textures/FX"
+                elif tag_norm == "Melody":
+                    folder = f"{safe_kit_name}/Sounds/4. Melodic & Instruments/Melodic One-Shots"
+                elif tag_norm == "Chords":
+                    folder = f"{safe_kit_name}/Sounds/4. Melodic & Instruments/Chords & Keys"
+                elif tag_norm == "Lead":
+                    folder = f"{safe_kit_name}/Sounds/4. Melodic & Instruments/Leads & Synths"
+                elif tag_norm == "Pluck":
+                    folder = f"{safe_kit_name}/Sounds/4. Melodic & Instruments/Plucks & Guitars"
                 else:
-                    folder = f"{safe_kit_name}/Instruments"
+                    folder = f"{safe_kit_name}/Sounds/4. Melodic & Instruments/Other Sounds"
 
                 sample_path = sound.get("sample_path")
-                sample_name = sound.get("sample_name") or f"sound_{sound['id']}.wav"
-                if not sample_name.lower().endswith(".wav") and not sample_name.lower().endswith(".mp3"):
-                    sample_name += ".wav"
+                raw_sample_name = sound.get("sample_name") or f"sound_{sound['id']}.wav"
+                if not raw_sample_name.lower().endswith(".wav") and not raw_sample_name.lower().endswith(".mp3"):
+                    raw_sample_name += ".wav"
+
+                # Prevent filename collisions inside the same subfolder
+                sample_name = raw_sample_name
+                counter = 1
+                while f"{folder}/{sample_name}" in used_paths:
+                    root_n, ext_n = os.path.splitext(raw_sample_name)
+                    sample_name = f"{root_n}_{counter}{ext_n}"
+                    counter += 1
+                used_paths.add(f"{folder}/{sample_name}")
 
                 file_written = False
                 if sample_path:
@@ -553,23 +645,72 @@ def export_sound_kit_zip(
                         except Exception:
                             pass
 
-                # If sample file not on disk, generate a dummy sample marker text
-                if not file_written:
-                    info_text = f"Sample: {sample_name}\nTag: {tag}\nChannel: {sound.get('channel_name')}\nOriginal Path: {sample_path}"
-                    zf.writestr(f"{folder}/{sample_name}.txt", info_text.encode("utf-8"))
+                # Check preview audio folder if physical file not on disk
+                if not file_written and os.path.exists(preview_dir):
+                    candidate_preview = os.path.join(preview_dir, f"{tag_norm.lower()}.wav")
+                    if os.path.exists(candidate_preview):
+                        try:
+                            with open(candidate_preview, "rb") as pf:
+                                zf.writestr(f"{folder}/{sample_name}", pf.read())
+                            file_written = True
+                        except Exception:
+                            pass
 
-        # 2. Add MIDIs
+                # Fallback to generated WAV audio so every sample is valid in the ZIP
+                if not file_written:
+                    wav_data = _generate_fallback_wav_bytes(tag_norm)
+                    zf.writestr(f"{folder}/{sample_name}", wav_data)
+
+        # 2. Add MIDIs (granularly subdivided into specific subfolders)
         if pattern_ids:
             placeholders = ",".join(["?"] * len(pattern_ids))
             cursor.execute(f"SELECT * FROM patterns WHERE id IN ({placeholders})", pattern_ids)
             for row in cursor.fetchall():
                 pat = dict(row)
                 tag = pat.get("tag", "Other")
+                tag_norm = normalize_tag(tag)
                 midi_bytes = pat.get("midi_bytes")
-                pat_name = pat.get("pattern_name", "Pattern").replace("/", "_")
-                midi_filename = f"{pat_name}_{tag}.mid"
+                pat_name = pat.get("pattern_name", "Pattern").replace("/", "_").replace("\\", "_")
+                raw_midi_filename = f"{pat_name}_{tag_norm}.mid"
+
+                # Categorize MIDI into dedicated subfolders
+                if tag_norm == "808":
+                    midi_folder = f"{safe_kit_name}/MIDIs/1. Drum MIDIs/808 Patterns"
+                elif tag_norm == "Kick":
+                    midi_folder = f"{safe_kit_name}/MIDIs/1. Drum MIDIs/Kick Patterns"
+                elif tag_norm == "Snare":
+                    midi_folder = f"{safe_kit_name}/MIDIs/1. Drum MIDIs/Snare Patterns"
+                elif tag_norm == "Clap":
+                    midi_folder = f"{safe_kit_name}/MIDIs/1. Drum MIDIs/Clap Patterns"
+                elif tag_norm == "Rim":
+                    midi_folder = f"{safe_kit_name}/MIDIs/1. Drum MIDIs/Rim Patterns"
+                elif tag_norm in ["Hi-Hat", "Open Hat"]:
+                    midi_folder = f"{safe_kit_name}/MIDIs/1. Drum MIDIs/Hi-Hat Rolls & Loops"
+                elif tag_norm in ["Perc", "Tom", "Crash"]:
+                    midi_folder = f"{safe_kit_name}/MIDIs/1. Drum MIDIs/Percussion & Toms"
+                elif tag_norm == "Melody":
+                    midi_folder = f"{safe_kit_name}/MIDIs/2. Melodic MIDIs/Melodies & Toplines"
+                elif tag_norm == "Chords":
+                    midi_folder = f"{safe_kit_name}/MIDIs/2. Melodic MIDIs/Chord Progressions"
+                elif tag_norm == "Lead":
+                    midi_folder = f"{safe_kit_name}/MIDIs/2. Melodic MIDIs/Leads & Synths"
+                elif tag_norm == "Pluck":
+                    midi_folder = f"{safe_kit_name}/MIDIs/2. Melodic MIDIs/Plucks & Arps"
+                elif tag_norm == "Bass":
+                    midi_folder = f"{safe_kit_name}/MIDIs/2. Melodic MIDIs/Basslines"
+                else:
+                    midi_folder = f"{safe_kit_name}/MIDIs/2. Melodic MIDIs/Other Melodic MIDIs"
+
+                midi_filename = raw_midi_filename
+                counter = 1
+                while f"{midi_folder}/{midi_filename}" in used_paths:
+                    root_n, ext_n = os.path.splitext(raw_midi_filename)
+                    midi_filename = f"{root_n}_{counter}{ext_n}"
+                    counter += 1
+                used_paths.add(f"{midi_folder}/{midi_filename}")
+
                 if midi_bytes:
-                    zf.writestr(f"{safe_kit_name}/MIDIs/{midi_filename}", midi_bytes)
+                    zf.writestr(f"{midi_folder}/{midi_filename}", midi_bytes)
 
     conn.close()
     return zip_buffer.getvalue()
@@ -688,4 +829,117 @@ def update_patterns_tag(pattern_ids: List[int], tag: str):
         pass
     conn.commit()
     conn.close()
+
+# ─── Kit Builder Persistence (SQLite) ───────────────────
+
+def get_all_kits_db() -> Dict[str, Any]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM kits ORDER BY created_at ASC")
+    rows = cursor.fetchall()
+
+    # Create default kit if table is empty
+    if not rows:
+        now = int(time.time())
+        cursor.execute(
+            "INSERT INTO kits (id, name, sound_ids, pattern_ids, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            ('default', 'My_StashSound_Kit', json.dumps([]), json.dumps([]), now, now)
+        )
+        conn.commit()
+        cursor.execute("SELECT * FROM kits ORDER BY created_at ASC")
+        rows = cursor.fetchall()
+
+    kits = []
+    for r in rows:
+        k_dict = dict(r)
+        k_id = k_dict["id"]
+        k_name = k_dict["name"]
+
+        try:
+            s_ids = json.loads(k_dict.get("sound_ids") or "[]")
+        except Exception:
+            s_ids = []
+
+        try:
+            p_ids = json.loads(k_dict.get("pattern_ids") or "[]")
+        except Exception:
+            p_ids = []
+
+        sounds = []
+        if s_ids:
+            placeholders = ",".join(["?"] * len(s_ids))
+            cursor.execute(f"SELECT * FROM sounds WHERE id IN ({placeholders})", s_ids)
+            s_map = {row["id"]: dict(row) for row in cursor.fetchall()}
+            for sid in s_ids:
+                if sid in s_map:
+                    sounds.append(s_map[sid])
+
+        patterns = []
+        if p_ids:
+            placeholders = ",".join(["?"] * len(p_ids))
+            cursor.execute(f"SELECT * FROM patterns WHERE id IN ({placeholders})", p_ids)
+            p_map = {row["id"]: dict(row) for row in cursor.fetchall()}
+            for pid in p_ids:
+                if pid in p_map:
+                    p_data = p_map[pid]
+                    try:
+                        p_data["notes"] = json.loads(p_data.get("notes_json") or "[]")
+                    except Exception:
+                        p_data["notes"] = []
+                    patterns.append(p_data)
+
+        kits.append({
+            "id": k_id,
+            "name": k_name,
+            "sounds": sounds,
+            "patterns": patterns
+        })
+
+    cursor.execute("SELECT value FROM app_settings WHERE key = 'active_kit_id'")
+    sett_row = cursor.fetchone()
+    active_kit_id = sett_row["value"] if sett_row else (kits[0]["id"] if kits else "default")
+
+    conn.close()
+    return {"kits": kits, "active_kit_id": active_kit_id}
+
+def save_kit_db(kit_id: str, name: str, sound_ids: List[int], pattern_ids: List[int]) -> bool:
+    conn = get_connection()
+    cursor = conn.cursor()
+    now = int(time.time())
+
+    cursor.execute("SELECT id FROM kits WHERE id = ?", (kit_id,))
+    exists = cursor.fetchone()
+    if exists:
+        cursor.execute(
+            "UPDATE kits SET name = ?, sound_ids = ?, pattern_ids = ?, updated_at = ? WHERE id = ?",
+            (name, json.dumps(sound_ids), json.dumps(pattern_ids), now, kit_id)
+        )
+    else:
+        cursor.execute(
+            "INSERT INTO kits (id, name, sound_ids, pattern_ids, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (kit_id, name, json.dumps(sound_ids), json.dumps(pattern_ids), now, now)
+        )
+    conn.commit()
+    conn.close()
+    return True
+
+def delete_kit_db(kit_id: str) -> bool:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM kits WHERE id = ?", (kit_id,))
+    conn.commit()
+    conn.close()
+    return True
+
+def set_active_kit_id_db(kit_id: str) -> bool:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO app_settings (key, value) VALUES ('active_kit_id', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (kit_id,)
+    )
+    conn.commit()
+    conn.close()
+    return True
+
 

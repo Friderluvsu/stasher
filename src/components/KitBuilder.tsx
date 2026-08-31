@@ -3,6 +3,11 @@ import ReactDOM from 'react-dom';
 import { useVaultStore } from '../state/vaultStore';
 import { useInterfaceStore } from '../state/interfaceStore';
 import { notify } from '../state/toastStore';
+import { api } from '../services/api';
+import { dragService } from '../services/dragService';
+import { generateMidiBase64 } from '../utils/midiBuilder';
+
+const DRUM_TAGS = ['808', 'Kick', 'Snare', 'Clap', 'Hi-Hat', 'Open Hat', 'Rim', 'Perc', 'Tom', 'Crash'];
 
 export const KitBuilder: React.FC = () => {
   const {
@@ -70,19 +75,57 @@ export const KitBuilder: React.FC = () => {
 
   const totalItems = kitSounds.length + kitPatterns.length;
 
-  const categories = [
-    { title: isRu ? '808s и Бас' : '808s & Bass', filter: (s: any) => ['808', 'Bass'].includes(s.tag), items: kitSounds.filter(s => ['808', 'Bass'].includes(s.tag)), icon: 'ti-flame', color: '#ff6b81' },
-    { title: isRu ? 'Кики (Kicks)' : 'Kicks', filter: (s: any) => s.tag === 'Kick', items: kitSounds.filter(s => s.tag === 'Kick'), icon: 'ti-circle-dot', color: '#ff9f43' },
-    { title: isRu ? 'Снейры и Клепы' : 'Snares & Claps', filter: (s: any) => ['Snare', 'Clap', 'Rim'].includes(s.tag), items: kitSounds.filter(s => ['Snare', 'Clap', 'Rim'].includes(s.tag)), icon: 'ti-hand-click', color: '#feca57' },
-    { title: isRu ? 'Хэты (Hi-Hats)' : 'Hi-Hats', filter: (s: any) => ['Hi-Hat', 'Open Hat'].includes(s.tag), items: kitSounds.filter(s => ['Hi-Hat', 'Open Hat'].includes(s.tag)), icon: 'ti-sparkles', color: '#48dbfb' },
-    { title: isRu ? 'Перкуссия и FX' : 'Percs & FX', filter: (s: any) => ['Perc', 'Vox', 'FX'].includes(s.tag), items: kitSounds.filter(s => ['Perc', 'Vox', 'FX'].includes(s.tag)), icon: 'ti-brand-beats', color: '#54a0ff' },
-    { title: isRu ? 'Инструменты и Мелодии' : 'Instruments & Melodies', filter: (s: any) => ['Chords', 'Melody', 'Lead', 'Pluck', 'Other'].includes(s.tag), items: kitSounds.filter(s => ['Chords', 'Melody', 'Lead', 'Pluck', 'Other'].includes(s.tag)), icon: 'ti-music', color: '#a55eea' },
-  ];
+  const normalizeTag = (t?: string) => (t || 'Other').trim();
+
+  // 1. MIDI Melodies & Instruments
+  const melodicPatterns = kitPatterns.filter(p => !DRUM_TAGS.includes(normalizeTag(p.tag)));
+  const melodyCategories = [
+    { title: isRu ? 'Мелодии (Melodies)' : 'Melodies & Toplines', items: melodicPatterns.filter(p => normalizeTag(p.tag) === 'Melody'), icon: 'ti-music', color: '#9a90ff' },
+    { title: isRu ? 'Аккорды (Chords)' : 'Chord Progressions', items: melodicPatterns.filter(p => normalizeTag(p.tag) === 'Chords'), icon: 'ti-piano', color: '#71c89f' },
+    { title: isRu ? 'Лиды (Leads)' : 'Leads & Synths', items: melodicPatterns.filter(p => normalizeTag(p.tag) === 'Lead'), icon: 'ti-wand', color: '#a55eea' },
+    { title: isRu ? 'Плаки (Plucks)' : 'Plucks & Arps', items: melodicPatterns.filter(p => normalizeTag(p.tag) === 'Pluck'), icon: 'ti-guitar-pick', color: '#38ada9' },
+    { title: isRu ? 'Бас MIDI (Basslines)' : 'Basslines', items: melodicPatterns.filter(p => normalizeTag(p.tag) === 'Bass'), icon: 'ti-wave-sine', color: '#ff6b81' },
+    { title: isRu ? 'Прочие MIDI' : 'Other Melodic MIDIs', items: melodicPatterns.filter(p => !['Melody', 'Chords', 'Lead', 'Pluck', 'Bass'].includes(normalizeTag(p.tag))), icon: 'ti-dots', color: '#8a92a1' },
+  ].filter(c => c.items.length > 0);
+
+  // 2. MIDI Drums & Grooves
+  const drumPatterns = kitPatterns.filter(p => DRUM_TAGS.includes(normalizeTag(p.tag)));
+  const drumMidiCategories = [
+    { title: isRu ? '808 MIDI' : '808 Patterns', items: drumPatterns.filter(p => normalizeTag(p.tag) === '808'), icon: 'ti-flame', color: '#ff6b81' },
+    { title: isRu ? 'Хэты & Роллы (Hi-Hats)' : 'Hi-Hat Rolls & Loops', items: drumPatterns.filter(p => ['Hi-Hat', 'Open Hat'].includes(normalizeTag(p.tag))), icon: 'ti-sparkles', color: '#48dbfb' },
+    { title: isRu ? 'Кики (Kicks)' : 'Kick Patterns', items: drumPatterns.filter(p => normalizeTag(p.tag) === 'Kick'), icon: 'ti-circle-dot', color: '#ff9f43' },
+    { title: isRu ? 'Снейры (Snares)' : 'Snare Patterns', items: drumPatterns.filter(p => normalizeTag(p.tag) === 'Snare'), icon: 'ti-circle-dashed', color: '#feca57' },
+    { title: isRu ? 'Клэпы (Claps)' : 'Clap Patterns', items: drumPatterns.filter(p => normalizeTag(p.tag) === 'Clap'), icon: 'ti-hand-stop', color: '#fed330' },
+    { title: isRu ? 'Римы (Rims)' : 'Rim Patterns', items: drumPatterns.filter(p => normalizeTag(p.tag) === 'Rim'), icon: 'ti-crosshair', color: '#fa8231' },
+    { title: isRu ? 'Перкуссия & Томы' : 'Percussion & Toms', items: drumPatterns.filter(p => ['Perc', 'Tom', 'Crash'].includes(normalizeTag(p.tag))), icon: 'ti-grain', color: '#54a0ff' },
+  ].filter(c => c.items.length > 0);
+
+  // 3. Audio Sounds (One-shots & Samples)
+  const soundCategories = [
+    { title: isRu ? '808s' : '808s', items: kitSounds.filter(s => normalizeTag(s.tag) === '808'), icon: 'ti-flame', color: '#ff6b81' },
+    { title: isRu ? 'Бас (Basses)' : 'Basses', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Bass'), icon: 'ti-wave-sine', color: '#eb2f06' },
+    { title: isRu ? 'Кики (Kicks)' : 'Kicks', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Kick'), icon: 'ti-circle-dot', color: '#ff9f43' },
+    { title: isRu ? 'Снейры (Snares)' : 'Snares', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Snare'), icon: 'ti-circle-dashed', color: '#feca57' },
+    { title: isRu ? 'Клэпы (Claps)' : 'Claps', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Clap'), icon: 'ti-hand-stop', color: '#fed330' },
+    { title: isRu ? 'Римы (Rims)' : 'Rims', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Rim'), icon: 'ti-crosshair', color: '#fa8231' },
+    { title: isRu ? 'Хэты (Hi-Hats Closed)' : 'Hi-Hats (Closed)', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Hi-Hat'), icon: 'ti-sparkles', color: '#48dbfb' },
+    { title: isRu ? 'Открытые хэты (Open Hats)' : 'Open Hats', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Open Hat'), icon: 'ti-ripple', color: '#00d2d3' },
+    { title: isRu ? 'Крэши & Тарелки (Crashes)' : 'Crashes & Cymbals', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Crash'), icon: 'ti-sun', color: '#2bcbba' },
+    { title: isRu ? 'Перкуссия (Percs)' : 'Percs', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Perc'), icon: 'ti-grain', color: '#54a0ff' },
+    { title: isRu ? 'Томы (Toms)' : 'Toms', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Tom'), icon: 'ti-circles', color: '#45aaf2' },
+    { title: isRu ? 'Вокал & Чанты (Vox)' : 'Vox & Chants', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Vox'), icon: 'ti-microphone', color: '#fd9644' },
+    { title: isRu ? 'Спецэффекты (FX & Risers)' : 'FX & Risers', items: kitSounds.filter(s => normalizeTag(s.tag) === 'FX'), icon: 'ti-bolt', color: '#26de81' },
+    { title: isRu ? 'Мелодии (Melodic One-Shots)' : 'Melodic One-Shots', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Melody'), icon: 'ti-music', color: '#9a90ff' },
+    { title: isRu ? 'Аккорды & Клавишные' : 'Chords & Keys', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Chords'), icon: 'ti-piano', color: '#71c89f' },
+    { title: isRu ? 'Лиды & Синты (Leads)' : 'Leads & Synths', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Lead'), icon: 'ti-wand', color: '#a55eea' },
+    { title: isRu ? 'Плаки & Гитары (Plucks)' : 'Plucks & Guitars', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Pluck'), icon: 'ti-guitar-pick', color: '#38ada9' },
+    { title: isRu ? 'Прочие инструменты' : 'Other Sounds', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Other'), icon: 'ti-dots', color: '#8a92a1' },
+  ].filter(c => c.items.length > 0);
 
   const handleQuickCreate = () => {
     const nextNum = kits.length + 1;
     const name = isRu ? `Набор ${nextNum}` : `Kit ${nextNum}`;
-    const newId = createKit(name);
+    createKit(name);
     notify.success(isRu ? `Создан "${name}"` : `Created "${name}"`, 'Kit Builder');
     setTimeout(() => {
       nameInputRef.current?.focus();
@@ -117,8 +160,63 @@ export const KitBuilder: React.FC = () => {
     notify.info(isRu ? 'Набор очищен' : 'Kit cleared', 'Kit Builder');
   };
 
+  const handleSoundDragStart = (e: React.DragEvent, sound: any) => {
+    dragService.startDrag({ type: 'sound', id: sound.id, ids: [sound.id], tag: sound.tag });
+    e.dataTransfer.setData('application/x-stasher-internal', 'true');
+    e.dataTransfer.setData('application/x-stasher-item-type', 'sound');
+    e.dataTransfer.setData('application/x-stasher-item-id', String(sound.id));
+
+    const audioUrl = api.getSoundAudioUrl(sound.id);
+    const fileName = sound.sample_name || `sound_${sound.id}.wav`;
+    e.dataTransfer.setData('DownloadURL', `audio/wav:${fileName}:${audioUrl}`);
+    e.dataTransfer.setData('text/plain', audioUrl);
+
+    if ((window as any).electronAPI?.startDrag) {
+      e.preventDefault();
+      (window as any).electronAPI.startDrag({
+        type: 'sound',
+        id: sound.id,
+        fileName,
+        samplePath: sound.sample_path,
+        tag: sound.tag,
+      });
+    }
+  };
+
+  const handlePatternDragStart = (e: React.DragEvent, pat: any) => {
+    dragService.startDrag({ type: 'pattern', id: pat.id, ids: [pat.id], tag: pat.tag });
+    e.dataTransfer.setData('application/x-stasher-internal', 'true');
+    e.dataTransfer.setData('application/x-stasher-item-type', 'pattern');
+    e.dataTransfer.setData('application/x-stasher-item-id', String(pat.id));
+
+    const fileName = `${(pat.pattern_name || 'pattern').replace(/[^a-zA-Z0-9_-]/g, '_')}_${pat.tag}.mid`;
+    const midiUrl = api.getMidiUrl(pat.id);
+    e.dataTransfer.setData('DownloadURL', `audio/midi:${fileName}:${midiUrl}`);
+    e.dataTransfer.setData('text/plain', midiUrl);
+
+    if ((window as any).electronAPI?.startDrag) {
+      e.preventDefault();
+      try {
+        const base64Data = generateMidiBase64(
+          pat.notes || [],
+          pat.tempo || 140,
+          pat.ppq || 96,
+          pat.pattern_name || 'Pattern'
+        );
+        (window as any).electronAPI.startDrag({
+          type: 'midi',
+          patternId: pat.id,
+          fileName,
+          base64Data,
+        });
+      } catch (err) {
+        console.error('generateMidiBase64 error:', err);
+      }
+    }
+  };
+
   return (
-    <div className="workspace-content" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div className="workspace-content" style={{ display: 'flex', flexDirection: 'column', gap: 24, paddingBottom: 60 }}>
       {/* Kit Configuration Panel */}
       <div
         className="glass-panel"
@@ -168,7 +266,7 @@ export const KitBuilder: React.FC = () => {
                 type="button"
                 onClick={() => setIsKitSelectorOpen(!isKitSelectorOpen)}
                 className="glass-input inline-flex items-center justify-between gap-2 px-3 text-xs font-semibold"
-                style={{ height: 36, minWidth: 120, cursor: 'pointer' }}
+                style={{ height: 36, minWidth: 130, cursor: 'pointer' }}
                 title={isRu ? 'Выбрать или переключить набор' : 'Select or switch kit'}
               >
                 <span className="truncate flex items-center gap-1.5">
@@ -178,7 +276,7 @@ export const KitBuilder: React.FC = () => {
                 <i className="ti ti-chevron-down text-[10px] opacity-70" />
               </button>
 
-              {/* Kit Name Editor Input - allows completely clearing text */}
+              {/* Kit Name Editor Input */}
               <input
                 ref={nameInputRef}
                 type="text"
@@ -481,149 +579,20 @@ export const KitBuilder: React.FC = () => {
           </div>
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 16 }}>
-          {categories.map((cat, idx) => {
-            if (cat.items.length === 0) return null;
-            return (
-              <div
-                key={idx}
-                className="glass-card"
-                style={{
-                  padding: 16,
-                  borderRadius: 'var(--radius-card, 20px)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 12,
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div
-                      style={{
-                        width: 28,
-                        height: 28,
-                        borderRadius: 8,
-                        background: `color-mix(in srgb, ${cat.color} 15%, transparent)`,
-                        color: cat.color,
-                        display: 'grid',
-                        placeItems: 'center',
-                        fontSize: 14,
-                      }}
-                    >
-                      <i className={`ti ${cat.icon}`} />
-                    </div>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
-                      {cat.title}
-                    </span>
-                  </div>
-                  <span
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 700,
-                      padding: '2px 8px',
-                      borderRadius: 10,
-                      background: 'var(--field)',
-                      color: 'var(--muted)',
-                    }}
-                  >
-                    {cat.items.length}
-                  </span>
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {cat.items.map((sound: any) => {
-                    const isCurPlaying = isPlaying && currentlyPlayingId === sound.id;
-                    const cleanTitle = (sound.channel_name || '').trim() || sound.sample_name || 'Sound';
-                    return (
-                      <div
-                        key={sound.id}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          padding: '6px 10px',
-                          borderRadius: 10,
-                          background: 'rgba(255, 255, 255, 0.03)',
-                          border: '1px solid rgba(255, 255, 255, 0.05)',
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
-                          <button
-                            type="button"
-                            onClick={() => (isCurPlaying ? stopPlayback() : playSound(sound))}
-                            style={{
-                              width: 26,
-                              height: 26,
-                              borderRadius: '50%',
-                              background: isCurPlaying ? 'var(--accent)' : 'rgba(255, 255, 255, 0.08)',
-                              color: isCurPlaying ? '#000' : 'var(--text)',
-                              border: 'none',
-                              cursor: 'pointer',
-                              display: 'grid',
-                              placeItems: 'center',
-                              fontSize: 12,
-                              flexShrink: 0,
-                            }}
-                          >
-                            <i className={`ti ${isCurPlaying ? 'ti-player-stop' : 'ti-volume'}`} />
-                          </button>
-                          <span
-                            style={{
-                              fontSize: 12,
-                              fontWeight: 500,
-                              color: 'var(--text)',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
-                            }}
-                          >
-                            {cleanTitle}
-                          </span>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => removeKitSound(sound.id)}
-                          style={{
-                            background: 'none',
-                            border: 'none',
-                            color: 'var(--soft)',
-                            cursor: 'pointer',
-                            padding: 4,
-                            fontSize: 13,
-                          }}
-                          title={isRu ? 'Удалить из набора' : 'Remove from kit'}
-                        >
-                          <i className="ti ti-x" />
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-
-          {/* MIDI Patterns in Kit */}
-          {kitPatterns.length > 0 && (
-            <div
-              className="glass-card"
-              style={{
-                padding: 16,
-                borderRadius: 'var(--radius-card, 20px)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 12,
-              }}
-            >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+          {/* ═════════════════════════════════════════════════════════════════════ */}
+          {/* SECTION 1: 🎹 Melodic & Instrument MIDI Patterns                      */}
+          {/* ═════════════════════════════════════════════════════════════════════ */}
+          {melodicPatterns.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div
                     style={{
-                      width: 28,
-                      height: 28,
+                      width: 26,
+                      height: 26,
                       borderRadius: 8,
-                      background: 'rgba(154, 144, 255, 0.15)',
+                      background: 'rgba(154, 144, 255, 0.18)',
                       color: 'var(--accent)',
                       display: 'grid',
                       placeItems: 'center',
@@ -632,92 +601,477 @@ export const KitBuilder: React.FC = () => {
                   >
                     <i className="ti ti-music" />
                   </div>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
-                    {isRu ? 'MIDI Паттерны' : 'MIDI Patterns'}
+                  <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', letterSpacing: '0.01em' }}>
+                    {isRu ? 'Мелодические MIDI Паттерны' : 'Melodic & Chord MIDI Patterns'}
                   </span>
                 </div>
                 <span
                   style={{
                     fontSize: 11,
                     fontWeight: 700,
-                    padding: '2px 8px',
+                    padding: '3px 9px',
                     borderRadius: 10,
-                    background: 'var(--field)',
-                    color: 'var(--muted)',
+                    background: 'rgba(154, 144, 255, 0.12)',
+                    color: 'var(--accent)',
                   }}
                 >
-                  {kitPatterns.length}
+                  {melodicPatterns.length} {isRu ? 'паттернов' : 'patterns'}
                 </span>
               </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {kitPatterns.map((pat: any) => {
-                  const isCurPlaying = isPlaying && currentlyPlayingId === pat.id;
-                  return (
-                    <div
-                      key={pat.id}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        padding: '6px 10px',
-                        borderRadius: 10,
-                        background: 'rgba(255, 255, 255, 0.03)',
-                        border: '1px solid rgba(255, 255, 255, 0.05)',
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
-                        <button
-                          type="button"
-                          onClick={() => (isCurPlaying ? stopPlayback() : playPattern(pat))}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 14 }}>
+                {melodyCategories.map((cat, idx) => (
+                  <div
+                    key={idx}
+                    className="glass-card"
+                    style={{
+                      padding: 14,
+                      borderRadius: 'var(--radius-card, 18px)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 10,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div
                           style={{
                             width: 26,
                             height: 26,
-                            borderRadius: '50%',
-                            background: isCurPlaying ? 'var(--accent)' : 'rgba(255, 255, 255, 0.08)',
-                            color: isCurPlaying ? '#000' : 'var(--text)',
-                            border: 'none',
-                            cursor: 'pointer',
+                            borderRadius: 8,
+                            background: `color-mix(in srgb, ${cat.color} 15%, transparent)`,
+                            color: cat.color,
                             display: 'grid',
                             placeItems: 'center',
-                            fontSize: 12,
-                            flexShrink: 0,
+                            fontSize: 13,
                           }}
                         >
-                          <i className={`ti ${isCurPlaying ? 'ti-player-stop' : 'ti-player-play'}`} />
-                        </button>
-                        <span
-                          style={{
-                            fontSize: 12,
-                            fontWeight: 500,
-                            color: 'var(--text)',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          {pat.pattern_name}
+                          <i className={`ti ${cat.icon}`} />
+                        </div>
+                        <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text)' }}>
+                          {cat.title}
                         </span>
                       </div>
-
-                      <button
-                        type="button"
-                        onClick={() => removeKitPattern(pat.id)}
+                      <span
                         style={{
-                          background: 'none',
-                          border: 'none',
-                          color: 'var(--soft)',
-                          cursor: 'pointer',
-                          padding: 4,
-                          fontSize: 13,
+                          fontSize: 11,
+                          fontWeight: 700,
+                          padding: '2px 7px',
+                          borderRadius: 8,
+                          background: 'var(--field)',
+                          color: 'var(--muted)',
                         }}
-                        title={isRu ? 'Удалить из набора' : 'Remove from kit'}
                       >
-                        <i className="ti ti-x" />
-                      </button>
+                        {cat.items.length}
+                      </span>
                     </div>
-                  );
-                })}
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                      {cat.items.map((pat: any) => {
+                        const isCurPlaying = isPlaying && currentlyPlayingId === pat.id;
+                        return (
+                          <div
+                            key={pat.id}
+                            draggable
+                            onDragStart={(e) => handlePatternDragStart(e, pat)}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '6px 9px',
+                              borderRadius: 9,
+                              background: 'rgba(255, 255, 255, 0.03)',
+                              border: '1px solid rgba(255, 255, 255, 0.05)',
+                              cursor: 'grab',
+                            }}
+                            title={isRu ? 'Перетащите в FL Studio / DAW' : 'Drag to DAW'}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
+                              <button
+                                type="button"
+                                onClick={() => (isCurPlaying ? stopPlayback() : playPattern(pat))}
+                                style={{
+                                  width: 24,
+                                  height: 24,
+                                  borderRadius: '50%',
+                                  background: isCurPlaying ? 'var(--accent)' : 'rgba(255, 255, 255, 0.08)',
+                                  color: isCurPlaying ? '#000' : 'var(--text)',
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  display: 'grid',
+                                  placeItems: 'center',
+                                  fontSize: 11,
+                                  flexShrink: 0,
+                                }}
+                              >
+                                <i className={`ti ${isCurPlaying ? 'ti-player-stop' : 'ti-player-play'}`} />
+                              </button>
+                              <span
+                                style={{
+                                  fontSize: 12,
+                                  fontWeight: 500,
+                                  color: 'var(--text)',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                {pat.pattern_name}
+                              </span>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => removeKitPattern(pat.id)}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                color: 'var(--soft)',
+                                cursor: 'pointer',
+                                padding: 4,
+                                fontSize: 13,
+                              }}
+                              title={isRu ? 'Удалить из набора' : 'Remove from kit'}
+                            >
+                              <i className="ti ti-x" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ═════════════════════════════════════════════════════════════════════ */}
+          {/* SECTION 2: 🥁 Drum & Groove MIDI Patterns                             */}
+          {/* ═════════════════════════════════════════════════════════════════════ */}
+          {drumPatterns.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div
+                    style={{
+                      width: 26,
+                      height: 26,
+                      borderRadius: 8,
+                      background: 'rgba(255, 159, 67, 0.18)',
+                      color: '#ff9f43',
+                      display: 'grid',
+                      placeItems: 'center',
+                      fontSize: 14,
+                    }}
+                  >
+                    <i className="ti ti-circles" />
+                  </div>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', letterSpacing: '0.01em' }}>
+                    {isRu ? 'Барабанные MIDI Паттерны (Drum MIDI)' : 'Drum & Groove MIDI Patterns'}
+                  </span>
+                </div>
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    padding: '3px 9px',
+                    borderRadius: 10,
+                    background: 'rgba(255, 159, 67, 0.12)',
+                    color: '#ff9f43',
+                  }}
+                >
+                  {drumPatterns.length} {isRu ? 'паттернов' : 'patterns'}
+                </span>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 14 }}>
+                {drumMidiCategories.map((cat, idx) => (
+                  <div
+                    key={idx}
+                    className="glass-card"
+                    style={{
+                      padding: 14,
+                      borderRadius: 'var(--radius-card, 18px)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 10,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div
+                          style={{
+                            width: 26,
+                            height: 26,
+                            borderRadius: 8,
+                            background: `color-mix(in srgb, ${cat.color} 15%, transparent)`,
+                            color: cat.color,
+                            display: 'grid',
+                            placeItems: 'center',
+                            fontSize: 13,
+                          }}
+                        >
+                          <i className={`ti ${cat.icon}`} />
+                        </div>
+                        <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text)' }}>
+                          {cat.title}
+                        </span>
+                      </div>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          padding: '2px 7px',
+                          borderRadius: 8,
+                          background: 'var(--field)',
+                          color: 'var(--muted)',
+                        }}
+                      >
+                        {cat.items.length}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                      {cat.items.map((pat: any) => {
+                        const isCurPlaying = isPlaying && currentlyPlayingId === pat.id;
+                        return (
+                          <div
+                            key={pat.id}
+                            draggable
+                            onDragStart={(e) => handlePatternDragStart(e, pat)}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '6px 9px',
+                              borderRadius: 9,
+                              background: 'rgba(255, 255, 255, 0.03)',
+                              border: '1px solid rgba(255, 255, 255, 0.05)',
+                              cursor: 'grab',
+                            }}
+                            title={isRu ? 'Перетащите в FL Studio / DAW' : 'Drag to DAW'}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
+                              <button
+                                type="button"
+                                onClick={() => (isCurPlaying ? stopPlayback() : playPattern(pat))}
+                                style={{
+                                  width: 24,
+                                  height: 24,
+                                  borderRadius: '50%',
+                                  background: isCurPlaying ? 'var(--accent)' : 'rgba(255, 255, 255, 0.08)',
+                                  color: isCurPlaying ? '#000' : 'var(--text)',
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  display: 'grid',
+                                  placeItems: 'center',
+                                  fontSize: 11,
+                                  flexShrink: 0,
+                                }}
+                              >
+                                <i className={`ti ${isCurPlaying ? 'ti-player-stop' : 'ti-player-play'}`} />
+                              </button>
+                              <span
+                                style={{
+                                  fontSize: 12,
+                                  fontWeight: 500,
+                                  color: 'var(--text)',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                {pat.pattern_name}
+                              </span>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => removeKitPattern(pat.id)}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                color: 'var(--soft)',
+                                cursor: 'pointer',
+                                padding: 4,
+                                fontSize: 13,
+                              }}
+                              title={isRu ? 'Удалить из набора' : 'Remove from kit'}
+                            >
+                              <i className="ti ti-x" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ═════════════════════════════════════════════════════════════════════ */}
+          {/* SECTION 3: 🔊 Audio Samples & One-Shots                              */}
+          {/* ═════════════════════════════════════════════════════════════════════ */}
+          {kitSounds.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div
+                    style={{
+                      width: 26,
+                      height: 26,
+                      borderRadius: 8,
+                      background: 'rgba(72, 219, 251, 0.18)',
+                      color: '#48dbfb',
+                      display: 'grid',
+                      placeItems: 'center',
+                      fontSize: 14,
+                    }}
+                  >
+                    <i className="ti ti-volume" />
+                  </div>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', letterSpacing: '0.01em' }}>
+                    {isRu ? 'Звуковые Семплы (Audio Samples / One-Shots)' : 'Audio Samples & One-Shots'}
+                  </span>
+                </div>
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    padding: '3px 9px',
+                    borderRadius: 10,
+                    background: 'rgba(72, 219, 251, 0.12)',
+                    color: '#48dbfb',
+                  }}
+                >
+                  {kitSounds.length} {isRu ? 'звуков' : 'sounds'}
+                </span>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 14 }}>
+                {soundCategories.map((cat, idx) => (
+                  <div
+                    key={idx}
+                    className="glass-card"
+                    style={{
+                      padding: 14,
+                      borderRadius: 'var(--radius-card, 18px)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 10,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div
+                          style={{
+                            width: 26,
+                            height: 26,
+                            borderRadius: 8,
+                            background: `color-mix(in srgb, ${cat.color} 15%, transparent)`,
+                            color: cat.color,
+                            display: 'grid',
+                            placeItems: 'center',
+                            fontSize: 13,
+                          }}
+                        >
+                          <i className={`ti ${cat.icon}`} />
+                        </div>
+                        <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text)' }}>
+                          {cat.title}
+                        </span>
+                      </div>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          padding: '2px 7px',
+                          borderRadius: 8,
+                          background: 'var(--field)',
+                          color: 'var(--muted)',
+                        }}
+                      >
+                        {cat.items.length}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                      {cat.items.map((sound: any) => {
+                        const isCurPlaying = isPlaying && currentlyPlayingId === sound.id;
+                        const cleanTitle = (sound.channel_name || '').trim() || sound.sample_name || 'Sound';
+                        return (
+                          <div
+                            key={sound.id}
+                            draggable
+                            onDragStart={(e) => handleSoundDragStart(e, sound)}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '6px 9px',
+                              borderRadius: 9,
+                              background: 'rgba(255, 255, 255, 0.03)',
+                              border: '1px solid rgba(255, 255, 255, 0.05)',
+                              cursor: 'grab',
+                            }}
+                            title={isRu ? 'Перетащите в FL Studio / DAW' : 'Drag to DAW'}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
+                              <button
+                                type="button"
+                                onClick={() => (isCurPlaying ? stopPlayback() : playSound(sound))}
+                                style={{
+                                  width: 24,
+                                  height: 24,
+                                  borderRadius: '50%',
+                                  background: isCurPlaying ? 'var(--accent)' : 'rgba(255, 255, 255, 0.08)',
+                                  color: isCurPlaying ? '#000' : 'var(--text)',
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  display: 'grid',
+                                  placeItems: 'center',
+                                  fontSize: 11,
+                                  flexShrink: 0,
+                                }}
+                              >
+                                <i className={`ti ${isCurPlaying ? 'ti-player-stop' : 'ti-volume'}`} />
+                              </button>
+                              <span
+                                style={{
+                                  fontSize: 12,
+                                  fontWeight: 500,
+                                  color: 'var(--text)',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                {cleanTitle}
+                              </span>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => removeKitSound(sound.id)}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                color: 'var(--soft)',
+                                cursor: 'pointer',
+                                padding: 4,
+                                fontSize: 13,
+                              }}
+                              title={isRu ? 'Удалить из набора' : 'Remove from kit'}
+                            >
+                              <i className="ti ti-x" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}

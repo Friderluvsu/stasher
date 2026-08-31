@@ -71,6 +71,7 @@ interface VaultState {
   removeKitPattern: (patternId: number, kitId?: string) => void;
   clearKit: (kitId?: string) => void;
   exportKit: (kitId?: string) => Promise<void>;
+  fetchKits: () => Promise<void>;
 
   // Item Updates
   updateItemInStore: (type: 'sound' | 'pattern', id: number, name: string, tag: string) => void;
@@ -112,7 +113,43 @@ interface VaultState {
   _soundFetchSeq: number;
 }
 
+const KITS_STORAGE_KEY = 'stasher_kits_v1';
+const ACTIVE_KIT_STORAGE_KEY = 'stasher_active_kit_id_v1';
+
+function loadKitsFromStorage(): { kits: Kit[]; activeKitId: string } {
+  try {
+    const rawKits = localStorage.getItem(KITS_STORAGE_KEY);
+    const rawActiveId = localStorage.getItem(ACTIVE_KIT_STORAGE_KEY);
+    if (rawKits) {
+      const parsed = JSON.parse(rawKits);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const activeId = rawActiveId && parsed.some((k: Kit) => k.id === rawActiveId) ? rawActiveId : parsed[0].id;
+        return { kits: parsed, activeKitId: activeId };
+      }
+    }
+  } catch (e) {
+    console.error('Error loading kits from localStorage:', e);
+  }
+  return {
+    kits: [{ id: 'default', name: 'My_StashSound_Kit', sounds: [], patterns: [] }],
+    activeKitId: 'default',
+  };
+}
+
+function saveKitsToStorage(kits: Kit[], activeKitId?: string) {
+  try {
+    localStorage.setItem(KITS_STORAGE_KEY, JSON.stringify(kits));
+    if (activeKitId) {
+      localStorage.setItem(ACTIVE_KIT_STORAGE_KEY, activeKitId);
+    }
+  } catch (e) {
+    console.error('Error saving kits to localStorage:', e);
+  }
+}
+
 export const useVaultStore = create<VaultState>((set, get) => {
+  const initialKitsData = loadKitsFromStorage();
+
   audioEngine.setListener((isPlaying, patternId) => {
     set({ isPlaying, currentlyPlayingId: patternId });
   });
@@ -151,40 +188,24 @@ export const useVaultStore = create<VaultState>((set, get) => {
 
     toggleSelectSound: (id) => {
       const { selectedSoundIds } = get();
-      if (selectedSoundIds.includes(id)) {
-        set({ selectedSoundIds: selectedSoundIds.filter((x) => x !== id) });
-      } else {
-        set({ selectedSoundIds: [...selectedSoundIds, id] });
-      }
+      set({ selectedSoundIds: selectedSoundIds.includes(id) ? selectedSoundIds.filter((x) => x !== id) : [...selectedSoundIds, id] });
     },
 
     toggleSelectPattern: (id) => {
       const { selectedPatternIds } = get();
-      if (selectedPatternIds.includes(id)) {
-        set({ selectedPatternIds: selectedPatternIds.filter((x) => x !== id) });
-      } else {
-        set({ selectedPatternIds: [...selectedPatternIds, id] });
-      }
+      set({ selectedPatternIds: selectedPatternIds.includes(id) ? selectedPatternIds.filter((x) => x !== id) : [...selectedPatternIds, id] });
     },
 
     selectAllSounds: (ids) => {
       const allIds = ids || get().sounds.map((s) => s.id);
       const { selectedSoundIds } = get();
-      if (selectedSoundIds.length === allIds.length && allIds.length > 0) {
-        set({ selectedSoundIds: [] });
-      } else {
-        set({ selectedSoundIds: allIds });
-      }
+      set({ selectedSoundIds: selectedSoundIds.length === allIds.length && allIds.length > 0 ? [] : allIds });
     },
 
     selectAllPatterns: (ids) => {
       const allIds = ids || get().patterns.map((p) => p.id);
       const { selectedPatternIds } = get();
-      if (selectedPatternIds.length === allIds.length && allIds.length > 0) {
-        set({ selectedPatternIds: [] });
-      } else {
-        set({ selectedPatternIds: allIds });
-      }
+      set({ selectedPatternIds: selectedPatternIds.length === allIds.length && allIds.length > 0 ? [] : allIds });
     },
 
     clearSelection: () => {
@@ -192,16 +213,22 @@ export const useVaultStore = create<VaultState>((set, get) => {
     },
 
     batchDeleteSelected: async () => {
-      const { activeTab, selectedSoundIds, selectedPatternIds } = get();
+      const { activeTab, selectedSoundIds, selectedPatternIds, kits, activeKitId } = get();
       if (activeTab === 'sounds' && selectedSoundIds.length > 0) {
         const idsToDelete = [...selectedSoundIds];
         set({ selectedSoundIds: [] });
         await api.deleteSoundsBatch(idsToDelete);
+        const updatedKits = kits.map(k => ({ ...k, sounds: k.sounds.filter(s => !idsToDelete.includes(s.id)) }));
+        set({ kits: updatedKits });
+        saveKitsToStorage(updatedKits, activeKitId);
         await get().fetchSounds();
       } else if (activeTab === 'midi' && selectedPatternIds.length > 0) {
         const idsToDelete = [...selectedPatternIds];
         set({ selectedPatternIds: [] });
         await api.deletePatternsBatch(idsToDelete);
+        const updatedKits = kits.map(k => ({ ...k, patterns: k.patterns.filter(p => !idsToDelete.includes(p.id)) }));
+        set({ kits: updatedKits });
+        saveKitsToStorage(updatedKits, activeKitId);
         await get().fetchPatterns();
       }
     },
@@ -227,245 +254,209 @@ export const useVaultStore = create<VaultState>((set, get) => {
       if (type === 'sound') {
         const currentSounds = get().sounds;
         const currentTagCounts = { ...get().soundTagCounts };
-
-        // Optimistically recalculate counts
         for (const id of numIds) {
           const oldItem = currentSounds.find((s) => s.id === id);
           if (oldItem && oldItem.tag !== tag) {
-            if (oldItem.tag && currentTagCounts[oldItem.tag]) {
-              currentTagCounts[oldItem.tag] = Math.max(0, currentTagCounts[oldItem.tag] - 1);
-            }
+            if (oldItem.tag && currentTagCounts[oldItem.tag]) currentTagCounts[oldItem.tag] = Math.max(0, currentTagCounts[oldItem.tag] - 1);
             currentTagCounts[tag] = (currentTagCounts[tag] || 0) + 1;
           }
         }
-
         const updatedSounds = currentSounds.map((s) => (numIds.includes(s.id) ? { ...s, tag } : s));
-
-        set({
-          sounds: updatedSounds,
-          soundTagCounts: currentTagCounts,
-          kits: get().kits.map((k) => ({
-            ...k,
-            sounds: k.sounds.map((s) => (numIds.includes(s.id) ? { ...s, tag } : s)),
-          })),
-        });
-
-        try {
-          await api.updateSoundsTagBatch(numIds, tag);
-        } catch (err) {
-          console.warn('Batch sounds tag failed, updating individually:', err);
-          for (const id of numIds) {
-            const s = currentSounds.find((item) => item.id === id);
-            const name = s?.sample_name || s?.channel_name || 'Sound';
-            await api.updateSound(id, name, tag).catch(() => {});
-          }
-        }
+        const updatedKits = get().kits.map((k) => ({
+          ...k,
+          sounds: k.sounds.map((s) => (numIds.includes(s.id) ? { ...s, tag } : s)),
+        }));
+        set({ sounds: updatedSounds, soundTagCounts: currentTagCounts, kits: updatedKits });
+        saveKitsToStorage(updatedKits, get().activeKitId);
+        try { await api.updateSoundsTagBatch(numIds, tag); } catch {}
         await get().fetchSounds();
       } else {
         const currentPatterns = get().patterns;
         const currentTagCounts = { ...get().patternTagCounts };
-
-        // Optimistically recalculate counts
         for (const id of numIds) {
           const oldItem = currentPatterns.find((p) => p.id === id);
           if (oldItem && oldItem.tag !== tag) {
-            if (oldItem.tag && currentTagCounts[oldItem.tag]) {
-              currentTagCounts[oldItem.tag] = Math.max(0, currentTagCounts[oldItem.tag] - 1);
-            }
+            if (oldItem.tag && currentTagCounts[oldItem.tag]) currentTagCounts[oldItem.tag] = Math.max(0, currentTagCounts[oldItem.tag] - 1);
             currentTagCounts[tag] = (currentTagCounts[tag] || 0) + 1;
           }
         }
-
         const updatedPatterns = currentPatterns.map((p) => (numIds.includes(p.id) ? { ...p, tag } : p));
-
-        set({
-          patterns: updatedPatterns,
-          patternTagCounts: currentTagCounts,
-          kits: get().kits.map((k) => ({
-            ...k,
-            patterns: k.patterns.map((p) => (numIds.includes(p.id) ? { ...p, tag } : p)),
-          })),
-        });
-
-        try {
-          await api.updatePatternsTagBatch(numIds, tag);
-        } catch (err) {
-          console.warn('Batch patterns tag failed, updating individually:', err);
-          for (const id of numIds) {
-            const p = currentPatterns.find((item) => item.id === id);
-            const name = p?.pattern_name || p?.channel_name || 'Pattern';
-            await api.updatePattern(id, name, tag).catch(() => {});
-          }
-        }
+        const updatedKits = get().kits.map((k) => ({
+          ...k,
+          patterns: k.patterns.map((p) => (numIds.includes(p.id) ? { ...p, tag } : p)),
+        }));
+        set({ patterns: updatedPatterns, patternTagCounts: currentTagCounts, kits: updatedKits });
+        saveKitsToStorage(updatedKits, get().activeKitId);
+        try { await api.updatePatternsTagBatch(numIds, tag); } catch {}
         await get().fetchPatterns();
       }
     },
 
     batchAddSelectedToKit: (kitId?: string) => {
-      const { activeTab, selectedSoundIds, selectedPatternIds, sounds, patterns } = get();
+      const { activeTab, selectedSoundIds, selectedPatternIds, sounds, patterns, kits } = get();
       const targetId = kitId || get().activeKitId;
-
-      if (activeTab === 'sounds' && selectedSoundIds.length > 0) {
-        const selectedSounds = sounds.filter((s) => selectedSoundIds.includes(s.id));
-        set({
-          kits: get().kits.map((k) => {
-            if (k.id !== targetId) return k;
-            const existingIds = new Set(k.sounds.map((s) => s.id));
-            const newSounds = selectedSounds.filter((s) => !existingIds.has(s.id));
-            return { ...k, sounds: [...k.sounds, ...newSounds] };
-          }),
-        });
-      } else if (activeTab === 'midi' && selectedPatternIds.length > 0) {
-        const selectedPatterns = patterns.filter((p) => selectedPatternIds.includes(p.id));
-        set({
-          kits: get().kits.map((k) => {
-            if (k.id !== targetId) return k;
-            const existingIds = new Set(k.patterns.map((p) => p.id));
-            const newPatterns = selectedPatterns.filter((p) => !existingIds.has(p.id));
-            return { ...k, patterns: [...k.patterns, ...newPatterns] };
-          }),
-        });
+      const updatedKits = kits.map((k) => {
+        if (k.id !== targetId) return k;
+        if (activeTab === 'sounds') {
+          const selectedSounds = sounds.filter((s) => selectedSoundIds.includes(s.id));
+          const existingIds = new Set(k.sounds.map((s) => s.id));
+          return { ...k, sounds: [...k.sounds, ...selectedSounds.filter((s) => !existingIds.has(s.id))] };
+        } else {
+          const selectedPatterns = patterns.filter((p) => selectedPatternIds.includes(p.id));
+          const existingIds = new Set(k.patterns.map((p) => p.id));
+          return { ...k, patterns: [...k.patterns, ...selectedPatterns.filter((p) => !existingIds.has(p.id))] };
+        }
+      });
+      set({ kits: updatedKits });
+      saveKitsToStorage(updatedKits, get().activeKitId);
+      const targetKit = updatedKits.find(k => k.id === targetId);
+      if (targetKit) {
+        api.saveKit({
+          id: targetKit.id,
+          name: targetKit.name,
+          sound_ids: targetKit.sounds.map(s => s.id),
+          pattern_ids: targetKit.patterns.map(p => p.id)
+        }).catch(() => {});
       }
     },
 
-    kits: [{ id: 'default', name: 'My_StashSound_Kit', sounds: [], patterns: [] }],
-    activeKitId: 'default',
+    kits: initialKitsData.kits,
+    activeKitId: initialKitsData.activeKitId,
+
+    fetchKits: async () => {
+      try {
+        const res = await api.getKits();
+        if (res && res.kits && Array.isArray(res.kits) && res.kits.length > 0) {
+          const activeId = res.active_kit_id && res.kits.some(k => k.id === res.active_kit_id) ? res.active_kit_id : res.kits[0].id;
+          set({ kits: res.kits, activeKitId: activeId });
+          saveKitsToStorage(res.kits, activeId);
+        }
+      } catch (err) {
+        console.warn('Could not fetch kits from backend, using local cache:', err);
+      }
+    },
 
     createKit: (name) => {
       const id = Date.now().toString();
-      set({ kits: [...get().kits, { id, name, sounds: [], patterns: [] }], activeKitId: id });
+      const newKits = [...get().kits, { id, name, sounds: [], patterns: [] }];
+      set({ kits: newKits, activeKitId: id });
+      saveKitsToStorage(newKits, id);
+      api.saveKit({ id, name, sound_ids: [], pattern_ids: [] }).catch(() => {});
+      api.setActiveKit(id).catch(() => {});
       return id;
     },
-    setActiveKit: (id) => set({ activeKitId: id }),
+    setActiveKit: (id) => {
+      set({ activeKitId: id });
+      saveKitsToStorage(get().kits, id);
+      api.setActiveKit(id).catch(() => {});
+    },
     deleteKit: (id) => {
       const { kits, activeKitId } = get();
       if (kits.length <= 1) return;
       const newKits = kits.filter(k => k.id !== id);
-      set({ kits: newKits, activeKitId: activeKitId === id ? newKits[0].id : activeKitId });
+      const newActiveId = activeKitId === id ? newKits[0].id : activeKitId;
+      set({ kits: newKits, activeKitId: newActiveId });
+      saveKitsToStorage(newKits, newActiveId);
+      api.deleteKit(id).catch(() => {});
+      api.setActiveKit(newActiveId).catch(() => {});
     },
     setKitName: (id, name) => {
-      set({
-        kits: get().kits.map(k => k.id === id ? { ...k, name } : k)
-      });
+      const newKits = get().kits.map(k => k.id === id ? { ...k, name } : k);
+      set({ kits: newKits });
+      saveKitsToStorage(newKits, get().activeKitId);
+      const target = newKits.find(k => k.id === id);
+      if (target) {
+        api.saveKit({ id: target.id, name: target.name, sound_ids: target.sounds.map(s => s.id), pattern_ids: target.patterns.map(p => p.id) }).catch(() => {});
+      }
     },
-
     toggleKitSound: (sound, kitId) => {
       const targetId = kitId || get().activeKitId;
-      set({
-        kits: get().kits.map(k => {
-          if (k.id !== targetId) return k;
-          const exists = k.sounds.some(s => s.id === sound.id);
-          return {
-            ...k,
-            sounds: exists ? k.sounds.filter(s => s.id !== sound.id) : [...k.sounds, sound]
-          };
-        })
-      });
+      const newKits = get().kits.map(k => k.id === targetId ? { ...k, sounds: k.sounds.some(s => s.id === sound.id) ? k.sounds.filter(s => s.id !== sound.id) : [...k.sounds, sound] } : k);
+      set({ kits: newKits });
+      saveKitsToStorage(newKits, get().activeKitId);
+      const target = newKits.find(k => k.id === targetId);
+      if (target) {
+        api.saveKit({ id: target.id, name: target.name, sound_ids: target.sounds.map(s => s.id), pattern_ids: target.patterns.map(p => p.id) }).catch(() => {});
+      }
     },
-
     toggleKitPattern: (pattern, kitId) => {
       const targetId = kitId || get().activeKitId;
-      set({
-        kits: get().kits.map(k => {
-          if (k.id !== targetId) return k;
-          const exists = k.patterns.some(p => p.id === pattern.id);
-          return {
-            ...k,
-            patterns: exists ? k.patterns.filter(p => p.id !== pattern.id) : [...k.patterns, pattern]
-          };
-        })
-      });
+      const newKits = get().kits.map(k => k.id === targetId ? { ...k, patterns: k.patterns.some(p => p.id === pattern.id) ? k.patterns.filter(p => p.id !== pattern.id) : [...k.patterns, pattern] } : k);
+      set({ kits: newKits });
+      saveKitsToStorage(newKits, get().activeKitId);
+      const target = newKits.find(k => k.id === targetId);
+      if (target) {
+        api.saveKit({ id: target.id, name: target.name, sound_ids: target.sounds.map(s => s.id), pattern_ids: target.patterns.map(p => p.id) }).catch(() => {});
+      }
     },
-
     removeKitSound: (soundId, kitId) => {
       const targetId = kitId || get().activeKitId;
-      set({
-        kits: get().kits.map(k => k.id === targetId ? { ...k, sounds: k.sounds.filter(s => s.id !== soundId) } : k)
-      });
+      const newKits = get().kits.map(k => k.id === targetId ? { ...k, sounds: k.sounds.filter(s => s.id !== soundId) } : k);
+      set({ kits: newKits });
+      saveKitsToStorage(newKits, get().activeKitId);
+      const target = newKits.find(k => k.id === targetId);
+      if (target) {
+        api.saveKit({ id: target.id, name: target.name, sound_ids: target.sounds.map(s => s.id), pattern_ids: target.patterns.map(p => p.id) }).catch(() => {});
+      }
     },
-
     removeKitPattern: (patternId, kitId) => {
       const targetId = kitId || get().activeKitId;
-      set({
-        kits: get().kits.map(k => k.id === targetId ? { ...k, patterns: k.patterns.filter(p => p.id !== patternId) } : k)
-      });
+      const newKits = get().kits.map(k => k.id === targetId ? { ...k, patterns: k.patterns.filter(p => p.id !== patternId) } : k);
+      set({ kits: newKits });
+      saveKitsToStorage(newKits, get().activeKitId);
+      const target = newKits.find(k => k.id === targetId);
+      if (target) {
+        api.saveKit({ id: target.id, name: target.name, sound_ids: target.sounds.map(s => s.id), pattern_ids: target.patterns.map(p => p.id) }).catch(() => {});
+      }
     },
-
     clearKit: (kitId) => {
       const targetId = kitId || get().activeKitId;
-      set({
-        kits: get().kits.map(k => k.id === targetId ? { ...k, sounds: [], patterns: [] } : k)
-      });
+      const newKits = get().kits.map(k => k.id === targetId ? { ...k, sounds: [], patterns: [] } : k);
+      set({ kits: newKits });
+      saveKitsToStorage(newKits, get().activeKitId);
+      const target = newKits.find(k => k.id === targetId);
+      if (target) {
+        api.saveKit({ id: target.id, name: target.name, sound_ids: [], pattern_ids: [] }).catch(() => {});
+      }
     },
-
     exportKit: async (kitId) => {
       const targetId = kitId || get().activeKitId;
       const kit = get().kits.find(k => k.id === targetId);
       if (!kit) return;
       try {
-        const blob = await api.exportKit({
-          kit_name: kit.name || 'My_StashSound_Kit',
-          sound_ids: kit.sounds.map(s => s.id),
-          pattern_ids: kit.patterns.map(p => p.id)
-        });
-
+        const blob = await api.exportKit({ kit_name: kit.name || 'My_StashSound_Kit', sound_ids: kit.sounds.map(s => s.id), pattern_ids: kit.patterns.map(p => p.id) });
         const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${(kit.name || 'My_StashSound_Kit').replace(/[^a-zA-Z0-9_-]/g, '_')}.zip`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      } catch (err) {
-        console.error('Kit export error:', err);
-      }
+        const a = document.createElement('a'); a.href = url; a.download = `${(kit.name || 'My_StashSound_Kit').replace(/[^a-zA-Z0-9_-]/g, '_')}.zip`;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+      } catch (err) { console.error('Kit export error:', err); }
     },
-
     updateItemInStore: (type, id, name, tag) => {
       if (type === 'sound') {
         const currentSounds = get().sounds;
         const currentTagCounts = { ...get().soundTagCounts };
         const oldItem = currentSounds.find((s) => s.id === id);
         if (oldItem && oldItem.tag !== tag) {
-          if (oldItem.tag && currentTagCounts[oldItem.tag]) {
-            currentTagCounts[oldItem.tag] = Math.max(0, currentTagCounts[oldItem.tag] - 1);
-          }
+          if (oldItem.tag && currentTagCounts[oldItem.tag]) currentTagCounts[oldItem.tag] = Math.max(0, currentTagCounts[oldItem.tag] - 1);
           currentTagCounts[tag] = (currentTagCounts[tag] || 0) + 1;
         }
-
-        set({
-          sounds: get().sounds.map(s => s.id === id ? { ...s, sample_name: name, tag } : s),
-          soundTagCounts: currentTagCounts,
-          kits: get().kits.map(k => ({
-            ...k,
-            sounds: k.sounds.map(s => s.id === id ? { ...s, sample_name: name, tag } : s)
-          }))
-        });
+        const updatedKits = get().kits.map(k => ({ ...k, sounds: k.sounds.map(s => s.id === id ? { ...s, sample_name: name, tag } : s) }));
+        set({ sounds: get().sounds.map(s => s.id === id ? { ...s, sample_name: name, tag } : s), soundTagCounts: currentTagCounts, kits: updatedKits });
+        saveKitsToStorage(updatedKits, get().activeKitId);
         get().fetchSounds();
       } else {
         const currentPatterns = get().patterns;
         const currentTagCounts = { ...get().patternTagCounts };
         const oldItem = currentPatterns.find((p) => p.id === id);
         if (oldItem && oldItem.tag !== tag) {
-          if (oldItem.tag && currentTagCounts[oldItem.tag]) {
-            currentTagCounts[oldItem.tag] = Math.max(0, currentTagCounts[oldItem.tag] - 1);
-          }
+          if (oldItem.tag && currentTagCounts[oldItem.tag]) currentTagCounts[oldItem.tag] = Math.max(0, currentTagCounts[oldItem.tag] - 1);
           currentTagCounts[tag] = (currentTagCounts[tag] || 0) + 1;
         }
-
-        set({
-          patterns: get().patterns.map(p => p.id === id ? { ...p, pattern_name: name, tag } : p),
-          patternTagCounts: currentTagCounts,
-          kits: get().kits.map(k => ({
-            ...k,
-            patterns: k.patterns.map(p => p.id === id ? { ...p, pattern_name: name, tag } : p)
-          }))
-        });
+        const updatedKits = get().kits.map(k => ({ ...k, patterns: k.patterns.map(p => p.id === id ? { ...p, pattern_name: name, tag } : p) }));
+        set({ patterns: get().patterns.map(p => p.id === id ? { ...p, pattern_name: name, tag } : p), patternTagCounts: currentTagCounts, kits: updatedKits });
+        saveKitsToStorage(updatedKits, get().activeKitId);
         get().fetchPatterns();
       }
     },
-
     updateItemTag: async (type, id, tag) => {
       return get().batchUpdateItemsTag(type, [id], tag);
     },

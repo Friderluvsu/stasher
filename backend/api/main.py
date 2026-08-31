@@ -25,7 +25,8 @@ try:
         init_db, save_project, query_patterns, query_sounds, get_pattern_midi,
         get_sound_by_id, export_sound_kit_zip, get_projects, delete_project,
         delete_sounds, delete_patterns, update_sounds_tag, update_patterns_tag,
-        update_sound, update_pattern
+        update_sound, update_pattern, get_all_kits_db, save_kit_db, delete_kit_db,
+        set_active_kit_id_db
     )
     from backend.core.parser import parse_flp_project
     from backend.core.midi_generator import create_midi_bytes
@@ -35,7 +36,8 @@ except Exception:
             init_db, save_project, query_patterns, query_sounds, get_pattern_midi,
             get_sound_by_id, export_sound_kit_zip, get_projects, delete_project,
             delete_sounds, delete_patterns, update_sounds_tag, update_patterns_tag,
-            update_sound, update_pattern
+            update_sound, update_pattern, get_all_kits_db, save_kit_db, delete_kit_db,
+            set_active_kit_id_db
         )
         from core.parser import parse_flp_project
         from core.midi_generator import create_midi_bytes
@@ -71,6 +73,15 @@ class KitExportRequest(BaseModel):
     kit_name: str = "My_StashSound_Kit"
     sound_ids: List[int] = []
     pattern_ids: List[int] = []
+
+class SaveKitRequest(BaseModel):
+    id: str
+    name: str
+    sound_ids: List[int] = []
+    pattern_ids: List[int] = []
+
+class SetActiveKitRequest(BaseModel):
+    active_kit_id: str
 
 scan_progress = {
     "is_scanning": False,
@@ -240,7 +251,31 @@ def get_sound_audio(sound_id: int):
     # If physical sample not found on disk, return 404 so Web Audio engine plays synth fallback
     raise HTTPException(status_code=404, detail="Sample audio file not found on disk")
 
-# ─── Sound Kit Builder Export Endpoint ─────────────────
+# ─── Sound Kit Builder Endpoints ──────────────────────
+@app.get("/api/kits")
+def get_kits():
+    return get_all_kits_db()
+
+@app.post("/api/kits")
+def save_kit(request: SaveKitRequest):
+    save_kit_db(
+        kit_id=request.id,
+        name=request.name,
+        sound_ids=request.sound_ids,
+        pattern_ids=request.pattern_ids
+    )
+    return {"status": "saved", "id": request.id}
+
+@app.delete("/api/kits/{kit_id}")
+def remove_kit(kit_id: str):
+    delete_kit_db(kit_id)
+    return {"status": "deleted", "id": kit_id}
+
+@app.post("/api/kits/active")
+def set_active_kit(request: SetActiveKitRequest):
+    set_active_kit_id_db(request.active_kit_id)
+    return {"status": "active_set", "active_kit_id": request.active_kit_id}
+
 @app.post("/api/kits/export")
 def export_kit(request: KitExportRequest):
     zip_bytes = export_sound_kit_zip(

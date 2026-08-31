@@ -21,7 +21,7 @@ export default function App() {
     patterns, sounds, projects,
     selectedTag,
     selectedProjectId, setSelectedProjectId,
-    fetchPatterns, fetchSounds, fetchProjects, seedDemoData,
+    fetchPatterns, fetchSounds, fetchProjects, fetchKits, seedDemoData,
     startScan, uploadAndScan, isScanning, scanProgress,
     deleteProject,
     selectedSoundIds, selectedPatternIds,
@@ -67,8 +67,9 @@ export default function App() {
     fetchPatterns();
     fetchSounds();
     fetchProjects();
+    fetchKits();
     audioEngine.preloadSamples();
-  }, [fetchPatterns, fetchSounds, fetchProjects]);
+  }, [fetchPatterns, fetchSounds, fetchProjects, fetchKits]);
 
   const [isDragOver, setIsDragOver] = useState(false);
 
