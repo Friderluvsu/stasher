@@ -30,7 +30,7 @@ jobs:
       - name: Install dependencies
         run: |
           npm ci || npm install
-          pip install -r backend/requirements.txt
+          pip install -r backend/requirements-dev.txt
 
       - name: TypeScript Check
         run: npm run typecheck
@@ -40,3 +40,6 @@ jobs:
 
       - name: Python Syntax Check
         run: python -m py_compile backend/api/main.py backend/core/*.py
+
+      - name: Python Tests
+        run: python -m pytest backend/tests -q

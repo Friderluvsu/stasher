@@ -607,19 +607,29 @@ export const useVaultStore = create<VaultState>((set, get) => {
 
     startScan: async (paths) => {
       set({ isScanning: true });
-      await api.startScan(paths);
-      get().pollScanProgress();
+      try {
+        await api.startScan(paths);
+        await get().pollScanProgress();
+      } catch (err) {
+        set({ isScanning: false });
+        console.error('Scan start error:', err);
+        throw err;
+      }
     },
 
     uploadAndScan: async (files) => {
       set({ isScanning: true });
       try {
-        await api.uploadAndScan(files);
+        const result = await api.uploadAndScan(files);
+        if (!result || result.successful === 0) {
+          throw new Error('No FLP projects were parsed');
+        }
         await get().fetchPatterns();
         await get().fetchSounds();
         await get().fetchProjects();
       } catch (err) {
         console.error('Upload and scan error:', err);
+        throw err;
       } finally {
         set({ isScanning: false });
       }

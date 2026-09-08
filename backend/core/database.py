@@ -941,5 +941,3 @@ def set_active_kit_id_db(kit_id: str) -> bool:
     conn.commit()
     conn.close()
     return True
-
-

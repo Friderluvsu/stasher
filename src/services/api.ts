@@ -134,6 +134,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ paths, recursive }),
     });
+    if (!res.ok) throw new Error(`Failed to start scan (${res.status})`);
     return res.json();
   },
 
@@ -146,6 +147,7 @@ export const api = {
       method: 'POST',
       body: formData,
     });
+    if (!res.ok) throw new Error(`Failed to upload and scan (${res.status})`);
     return res.json();
   },
 

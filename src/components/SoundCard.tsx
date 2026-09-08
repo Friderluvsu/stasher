@@ -140,14 +140,19 @@ export const SoundCard: React.FC<SoundCardProps> = ({ sound }) => {
           e.stopPropagation();
           toggleSelectSound(sound.id);
         }}
-        className={`w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 transition-all cursor-pointer ${
-          isSelected
-            ? 'bg-[var(--accent)] text-[#0e1017] shadow-sm'
-            : 'bg-white/5 border border-white/20 text-transparent hover:border-white/40'
-        }`}
+        className="flex-shrink-0 cursor-pointer transition-all flex items-center justify-center"
+        style={{
+          width: 15,
+          height: 15,
+          borderRadius: 4,
+          border: isSelected ? 'none' : '1.5px solid rgba(255,255,255,0.18)',
+          background: isSelected ? 'var(--accent)' : 'rgba(255,255,255,0.04)',
+        }}
         title={isSelected ? (isRu ? 'Снять выделение' : 'Deselect') : (isRu ? 'Выбрать' : 'Select')}
       >
-        <i className="ti ti-check text-xs font-bold" />
+        {isSelected && (
+          <i className="ti ti-check" style={{ fontSize: 10, color: '#0e1017', lineHeight: 1 }} />
+        )}
       </button>
 
       {/* Drag grip handle */}

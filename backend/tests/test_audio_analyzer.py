@@ -155,6 +155,14 @@ def test_clap_classification():
                 # Resonant band around 1800 Hz
                 tone = math.sin(2.0 * math.pi * 1800.0 * t) * 0.6 + raw_noise[idx] * 0.4
                 samples[idx] += tone * env
+
+    wav_path = create_synthetic_wav(samples, sr)
+    try:
+        res = classify_audio_waveform(wav_path)
+        assert res["tag"] in ["Clap", "Snare"], f"Expected Clap/Snare but got {res['tag']}"
+    finally:
+        if os.path.exists(wav_path):
+            os.remove(wav_path)
                 
 def test_snare_classification():
     sr = 44100

@@ -42,26 +42,37 @@ body[data-platform="win32"] .workspace-frame {
 .brand-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 10px 22px;
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: -0.04em;
+  gap: 8px;
+  padding: 0 6px 14px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
   flex-shrink: 0;
 }
 
 .brand-icon-box {
-  width: 28px;
-  height: 28px;
-  border-radius: 9px;
-  background: linear-gradient(135deg, #6366f1, #9a90ff, #ec4899);
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--accent);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
-  font-size: 16px;
+  color: #0e1017;
+  font-size: 13px;
   flex-shrink: 0;
-  box-shadow: 0 4px 14px rgba(154, 144, 255, 0.35);
+}
+
+.brand-row .plan-badge {
+  min-height: auto;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--muted);
 }
 
 .side-navigation {

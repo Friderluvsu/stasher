@@ -43,7 +43,9 @@ def create_midi_bytes(
     # Convert notes to events (note_on and note_off)
     events = []
     for n in notes:
-        pitch = max(0, min(127, int(n.get("pitch", 60))))
+        # FL Studio numbers octaves 1 higher than MIDI standard (Middle C = C5 in FL, C4 in MIDI).
+        # Subtract 12 so notes land on the correct octave after import.
+        pitch = max(0, min(127, int(n.get("pitch", 60)) - 12))
         pos = max(0, int(n.get("pos", 0)))
         duration = max(1, int(n.get("duration", 96)))
         velocity = max(1, min(127, int(n.get("velocity", 100))))

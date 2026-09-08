@@ -98,7 +98,7 @@ export default function App() {
     }
   }, []);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragOver(false);
@@ -119,8 +119,18 @@ export default function App() {
 
     for (let i = 0; i < files.length; i++) {
       const f = files[i];
-      const filePath = (f as any).path || '';
       const fileName = f.name || '';
+      let filePath = '';
+
+      // Electron 32+ removed File.path. webUtils is the supported replacement,
+      // but crossing an isolated preload boundary can still reject some File
+      // objects. A failed lookup must not abort the whole drop: individual FLP
+      // files can always be sent to the upload endpoint as a fallback.
+      try {
+        filePath = (window as any).electronAPI?.getPathForFile?.(f) || (f as any).path || '';
+      } catch (error) {
+        console.warn('Could not resolve dropped file path, using upload fallback:', error);
+      }
 
       // Ignore temp export cache or audio/midi files
       if (filePath.includes('stasher_drag_cache')) continue;
@@ -145,18 +155,38 @@ export default function App() {
       }
     }
 
-    if (validPaths.length > 0) {
-      notify.info(
-        isRu ? `Начато сканирование ${validPaths.length} проектов...` : `Started scanning ${validPaths.length} projects...`,
+    if (validPaths.length === 0 && validFilesToUpload.length === 0) {
+      notify.error(
+        isRu ? 'Не найдено файлов .flp для импорта' : 'No .flp files found to import',
         'Stasher'
       );
-      startScan(validPaths);
-    } else if (validFilesToUpload.length > 0) {
-      notify.info(
-        isRu ? `Загрузка и сканирование ${validFilesToUpload.length} проектов...` : `Uploading and scanning ${validFilesToUpload.length} projects...`,
+      return;
+    }
+
+    try {
+      // Upload pathless File objects first. This is the reliable fallback for
+      // sandboxed Electron renderers on both macOS and Windows.
+      if (validFilesToUpload.length > 0) {
+        notify.info(
+          isRu ? `Загрузка и сканирование ${validFilesToUpload.length} проектов...` : `Uploading and scanning ${validFilesToUpload.length} projects...`,
+          'Stasher'
+        );
+        await uploadAndScan(validFilesToUpload);
+      }
+
+      if (validPaths.length > 0) {
+        notify.info(
+          isRu ? `Начато сканирование ${validPaths.length} проектов...` : `Started scanning ${validPaths.length} projects...`,
+          'Stasher'
+        );
+        await startScan(validPaths);
+      }
+    } catch (error) {
+      console.error('FLP drop import failed:', error);
+      notify.error(
+        isRu ? 'Не удалось импортировать .flp проект' : 'Failed to import .flp project',
         'Stasher'
       );
-      uploadAndScan(validFilesToUpload);
     }
   }, [isRu, startScan, uploadAndScan]);
 

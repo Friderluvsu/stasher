@@ -2,15 +2,26 @@ const { app, BrowserWindow, ipcMain, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 
 let mainWindow = null;
 let pythonProcess = null;
+let isQuitting = false;
 
 const TEMP_DRAG_DIR = path.join(app.getPath('temp'), 'stasher_drag_cache');
 
 function ensureTempDir() {
   if (!fs.existsSync(TEMP_DRAG_DIR)) fs.mkdirSync(TEMP_DRAG_DIR, { recursive: true });
+
+  // Native drag exports are disposable. Remove leftovers older than one day.
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  for (const entry of fs.readdirSync(TEMP_DRAG_DIR, { withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    const filePath = path.join(TEMP_DRAG_DIR, entry.name);
+    try {
+      if (fs.statSync(filePath).mtimeMs < cutoff) fs.rmSync(filePath, { force: true });
+    } catch {}
+  }
 }
 
 // ─── Python Backend ────────────────────────────────────
@@ -62,6 +73,8 @@ function startPythonBackend() {
 
   pythonProcess = spawn(command, args, {
     cwd,
+    detached: process.platform !== 'win32',
+    windowsHide: true,
     env: {
       ...process.env,
       PYTHONPATH: projectRoot,
@@ -71,23 +84,57 @@ function startPythonBackend() {
     stdio: ['ignore', 'pipe', 'pipe']
   });
 
-  pythonProcess.stdout.on('data', (d) => process.stdout.write(`[api] ${d}`));
-  pythonProcess.stderr.on('data', (d) => process.stderr.write(`[api] ${d}`));
-  pythonProcess.on('close', (code) => console.log(`[api] exited code=${code}`));
+  const backendProcess = pythonProcess;
+  backendProcess.stdout.on('data', (d) => process.stdout.write(`[api] ${d}`));
+  backendProcess.stderr.on('data', (d) => process.stderr.write(`[api] ${d}`));
+  backendProcess.on('error', (error) => console.error('[Stasher] Backend process error:', error));
+  backendProcess.on('close', (code) => {
+    if (pythonProcess === backendProcess) pythonProcess = null;
+    console.log(`[api] exited code=${code}`);
+  });
 }
 
 function stopPythonBackend() {
-  if (pythonProcess) {
+  const backendProcess = pythonProcess;
+  if (!backendProcess) return;
+
+  // Capture the process before clearing the global reference. The previous
+  // implementation cleared pythonProcess immediately, so its delayed SIGKILL
+  // could never run and packaged backends were left alive after the UI closed.
+  pythonProcess = null;
+  const pid = backendProcess.pid;
+
+  try { backendProcess.stdout?.destroy(); } catch {}
+  try { backendProcess.stderr?.destroy(); } catch {}
+
+  if (!pid) return;
+
+  if (process.platform === 'win32') {
+    // PyInstaller may create a child process. taskkill /T is required to stop
+    // the complete backend tree instead of leaving Stasher running headlessly.
     try {
-      pythonProcess.kill('SIGTERM');
-      setTimeout(() => {
-        try {
-          if (pythonProcess) pythonProcess.kill('SIGKILL');
-        } catch {}
-      }, 500);
+      spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], {
+        windowsHide: true,
+        stdio: 'ignore',
+        timeout: 5000
+      });
     } catch {}
-    pythonProcess = null;
+    return;
   }
+
+  // The backend is spawned in its own process group on POSIX so both the
+  // PyInstaller parent and its worker are terminated on macOS.
+  try {
+    process.kill(-pid, 'SIGTERM');
+  } catch {
+    try { backendProcess.kill('SIGTERM'); } catch {}
+  }
+
+  setTimeout(() => {
+    try { process.kill(-pid, 'SIGKILL'); } catch {}
+  }, 750);
+
+  try { backendProcess.unref(); } catch {}
 }
 
 function waitForBackend(retries = 40) {
@@ -126,8 +173,8 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: false,
-      sandbox: false
+      webSecurity: true,
+      sandbox: true
     }
   };
 
@@ -140,10 +187,15 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => mainWindow.show());
 
-  // Fully quit application and terminate all backend processes on close
+  // Closing the primary window means quitting on every supported platform,
+  // including macOS where applications normally remain active without windows.
+  mainWindow.on('close', () => {
+    isQuitting = true;
+    stopPythonBackend();
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
-    stopPythonBackend();
     app.quit();
   });
 
@@ -257,6 +309,7 @@ ipcMain.on('ondragstart', (event, { type = 'midi', id, patternId, fileName, base
       const candidatePreviewName = previewMap[tagLower] || `${tagLower}.wav`;
 
       const candidateDirs = [
+        path.join(__dirname, '..', 'resources', 'audio', 'preview'),
         path.join(__dirname, '..', 'public', 'audio', 'preview'),
         path.join(__dirname, '..', 'dist', 'audio', 'preview'),
         path.join(process.resourcesPath, 'audio', 'preview'),
@@ -335,11 +388,12 @@ app.whenReady().then(async () => {
   createWindow();
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (!isQuitting && BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
 app.on('before-quit', () => {
+  isQuitting = true;
   stopPythonBackend();
 });
 

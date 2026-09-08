@@ -13,7 +13,7 @@ class AudioEngine {
   private isSamplesLoaded = false;
   private loadingPromise: Promise<void> | null = null;
 
-  // Sample files located in public/audio/preview/
+  // Preview files are served by the bundled backend from resources/audio/preview/.
   private sampleFiles: Record<string, string> = {
     '808': '808.wav',
     'bass': '808.wav',
@@ -49,7 +49,7 @@ class AudioEngine {
       this.ctx = new AudioCtx();
     }
 
-    this.loadingPromise = (async () => {
+    const task = (async () => {
       const timestamp = Date.now();
       const entries = Object.entries(this.sampleFiles);
       await Promise.all(
@@ -89,8 +89,13 @@ class AudioEngine {
       this.isSamplesLoaded = this.sampleBuffers.size > 0;
       console.log(`[AudioEngine] Successfully loaded ${this.sampleBuffers.size}/${entries.length} preview audio samples.`);
     })();
-
-    return this.loadingPromise;
+    this.loadingPromise = task;
+    try {
+      await task;
+    } finally {
+      // Allow a retry when the backend was still starting or an asset was unavailable.
+      if (this.loadingPromise === task) this.loadingPromise = null;
+    }
   }
 
   private patternPlaybackInfo: {

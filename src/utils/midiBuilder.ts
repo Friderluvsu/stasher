@@ -16,7 +16,9 @@ export function createMidiUint8Array(
 ): Uint8Array {
   const events: { pos: number; type: number; pitch: number; vel: number }[] = [];
   notes.forEach((n) => {
-    const pitch = Math.max(0, Math.min(127, Math.round(n.pitch)));
+    // FL Studio numbers octaves 1 higher than MIDI standard (Middle C = C5 in FL, C4 in MIDI).
+    // Subtract 12 so notes land on the correct octave after import.
+    const pitch = Math.max(0, Math.min(127, Math.round(n.pitch) - 12));
     const pos = Math.max(0, Math.round(n.pos));
     const dur = Math.max(1, Math.round(n.duration));
     const vel = Math.max(1, Math.min(127, Math.round(n.velocity || 100)));

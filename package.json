@@ -1,134 +1,154 @@
 {
-  "name": "stasher",
-  "version": "1.0.5",
-  "description": "Offline FL Studio project vault, MIDI/sample extractor, and pattern organizer with DAW drag-and-drop",
-  "main": "electron/main.cjs",
-  "type": "module",
-  "scripts": {
-    "dev:frontend": "vite",
-    "build:frontend": "vite build",
-    "dev:backend": "source backend/venv/bin/activate && python3 -m backend.api.main",
-    "build:backend": "pyinstaller --name stasher-backend --onefile backend/api/main.py --distpath backend-bin --hidden-import=uvicorn.logging --hidden-import=uvicorn.loops --hidden-import=uvicorn.loops.auto --hidden-import=uvicorn.protocols --hidden-import=uvicorn.protocols.http --hidden-import=uvicorn.protocols.http.auto --hidden-import=backend.core.database --hidden-import=backend.core.parser --hidden-import=backend.core.midi_generator --hidden-import=backend.core.classifier --hidden-import=backend.core.audio_analyzer --collect-all pyflp",
-    "app": "vite build && electron .",
-    "start": "vite build && electron .",
-    "dev": "vite",
-    "build": "npm run build:frontend && electron-builder",
-    "build:mac": "npm run build:frontend && electron-builder --mac",
-    "build:win": "npm run build:frontend && electron-builder --win",
-    "release:mac": "npm run build:frontend && electron-builder --mac --publish never",
-    "release:win": "npm run build:frontend && electron-builder --win --publish never",
-    "typecheck": "tsc --noEmit",
-    "release": "npm version patch && git push origin main --follow-tags",
-    "release:minor": "npm version minor && git push origin main --follow-tags",
-    "release:major": "npm version major && git push origin main --follow-tags"
-  },
-  "build": {
-    "appId": "com.frider.stasher",
-    "productName": "Stasher",
-    "npmRebuild": false,
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "Friderluvsu",
-        "repo": "stasher",
-        "releaseType": "release"
-      }
-    ],
-    "files": [
-      "dist/**/*",
-      "electron/**/*",
-      "icons/**/*",
-      "public/**/*",
-      "package.json",
-      "!**/*.md",
-      "!**/*.map",
-      "!**/*.bak",
-      "!**/.DS_Store"
-    ],
-    "extraResources": [
-      {
-        "from": "backend-bin",
-        "to": "backend",
-        "filter": [
-          "stasher-backend*",
-          "*.exe"
-        ]
-      },
-      {
-        "from": "public/audio/preview",
-        "to": "audio/preview"
-      }
-    ],
-    "asar": true,
-    "win": {
-      "icon": "icons/icon.ico",
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "executableName": "Stasher"
+    "name": "stasher",
+    "version": "1.0.5",
+    "description": "Offline FL Studio project vault, MIDI/sample extractor, and pattern organizer with DAW drag-and-drop",
+    "main": "electron/main.cjs",
+    "type": "module",
+    "scripts": {
+        "dev:frontend": "vite",
+        "build:frontend": "vite build",
+        "dev:backend": "source backend/venv/bin/activate && python3 -m backend.api.main",
+        "build:backend": "pyinstaller --name stasher-backend --onefile backend/api/main.py --distpath backend-bin --hidden-import=uvicorn.logging --hidden-import=uvicorn.loops --hidden-import=uvicorn.loops.auto --hidden-import=uvicorn.protocols --hidden-import=uvicorn.protocols.http --hidden-import=uvicorn.protocols.http.auto --hidden-import=backend.core.database --hidden-import=backend.core.parser --hidden-import=backend.core.midi_generator --hidden-import=backend.core.classifier --hidden-import=backend.core.audio_analyzer --collect-all pyflp",
+        "app": "vite build && electron .",
+        "start": "vite build && electron .",
+        "dev": "vite",
+        "build": "npm run build:frontend && electron-builder",
+        "build:mac": "npm run build:frontend && electron-builder --mac",
+        "build:win": "npm run build:frontend && electron-builder --win",
+        "release:mac": "npm run build:frontend && electron-builder --mac --publish never",
+        "release:win": "npm run build:frontend && electron-builder --win --publish never",
+        "typecheck": "tsc --noEmit",
+        "release": "npm version patch && git push origin main --follow-tags",
+        "release:minor": "npm version minor && git push origin main --follow-tags",
+        "release:major": "npm version major && git push origin main --follow-tags"
     },
-    "nsis": {
-      "artifactName": "${productName}-Setup-${version}.${ext}",
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "shortcutName": "Stasher"
-    },
-    "mac": {
-      "icon": "icons/icon.icns",
-      "artifactName": "${productName}-${version}-${arch}.${ext}",
-      "target": [
-        "dmg",
-        "zip"
-      ]
-    },
-    "dmg": {
-      "iconSize": 92,
-      "iconTextSize": 12,
-      "title": "Stasher",
-      "window": {
-        "width": 720,
-        "height": 500
-      },
-      "contents": [
-        {
-          "x": 205,
-          "y": 265
+    "build": {
+        "appId": "com.frider.stasher",
+        "productName": "Stasher",
+        "npmRebuild": false,
+        "directories": {
+            "output": "release"
         },
-        {
-          "x": 515,
-          "y": 265,
-          "type": "link",
-          "path": "/Applications"
+        "afterPack": "scripts/afterPack.cjs",
+        "electronLanguages": [
+            "en",
+            "ru"
+        ],
+        "publish": [
+            {
+                "provider": "github",
+                "owner": "Friderluvsu",
+                "repo": "stasher",
+                "releaseType": "release"
+            }
+        ],
+        "files": [
+            "dist/**/*",
+            "electron/**/*",
+            "icons/icon.png",
+            "icons/midi_icon.png",
+            "package.json",
+            "!dist/mac*/**/*",
+            "!dist/win*/**/*",
+            "!**/*.md",
+            "!**/*.map",
+            "!**/*.bak",
+            "!**/.DS_Store"
+        ],
+        "extraResources": [
+            {
+                "from": "backend-bin",
+                "to": "backend",
+                "filter": [
+                    "stasher-backend*",
+                    "*.exe"
+                ]
+            },
+            {
+                "from": "resources/audio/preview",
+                "to": "audio/preview",
+                "filter": [
+                    "808.wav",
+                    "clap.wav",
+                    "epiano.wav",
+                    "fx.wav",
+                    "hihat.wav",
+                    "kick.wav",
+                    "openhat.wav",
+                    "perc.wav",
+                    "piano.wav",
+                    "rim.wav",
+                    "snare.wav",
+                    "vox.wav"
+                ]
+            }
+        ],
+        "asar": true,
+        "win": {
+            "icon": "icons/icon.ico",
+            "target": [
+                {
+                    "target": "nsis",
+                    "arch": [
+                        "x64"
+                    ]
+                }
+            ],
+            "executableName": "Stasher"
+        },
+        "nsis": {
+            "artifactName": "${productName}-Setup-${version}.${ext}",
+            "oneClick": false,
+            "allowToChangeInstallationDirectory": true,
+            "createDesktopShortcut": true,
+            "createStartMenuShortcut": true,
+            "shortcutName": "Stasher"
+        },
+        "mac": {
+            "icon": "icons/icon.icns",
+            "artifactName": "${productName}-${version}-${arch}.${ext}",
+            "target": [
+                "dmg",
+                "zip"
+            ]
+        },
+        "dmg": {
+            "iconSize": 92,
+            "iconTextSize": 12,
+            "title": "Stasher",
+            "window": {
+                "width": 720,
+                "height": 500
+            },
+            "contents": [
+                {
+                    "x": 205,
+                    "y": 265
+                },
+                {
+                    "x": 515,
+                    "y": 265,
+                    "type": "link",
+                    "path": "/Applications"
+                }
+            ]
         }
-      ]
-    }
-  },
-  "dependencies": {
-    "@tabler/icons-webfont": "^3.46.0",
-    "lucide-react": "^1.16.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "react-router-dom": "^7.1.0",
-    "tone": "^15.0.4",
-    "zustand": "^5.0.2"
-  },
-  "devDependencies": {
-    "@tailwindcss/vite": "^4.0.0",
-    "@types/node": "^22.10.0",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
-    "@vitejs/plugin-react": "^4.3.4",
-    "electron": "^33.0.0",
-    "electron-builder": "^25.1.8",
-    "tailwindcss": "^4.0.0",
-    "typescript": "^5.7.0",
-    "vite": "^6.0.0"
-  }
+    },
+    "devDependencies": {
+        "@tabler/icons-webfont": "^3.46.0",
+        "@tailwindcss/vite": "^4.0.0",
+        "@types/node": "^22.10.0",
+        "@types/react": "^19.0.0",
+        "@types/react-dom": "^19.0.0",
+        "@vitejs/plugin-react": "^4.3.4",
+        "electron": "^33.0.0",
+        "electron-builder": "^25.1.8",
+        "react": "^19.0.0",
+        "react-dom": "^19.0.0",
+        "tailwindcss": "^4.0.0",
+        "typescript": "^5.7.0",
+        "vite": "^6.0.0",
+        "zustand": "^5.0.2"
+    },
+    "bundledDependencies": []
 }

@@ -181,13 +181,13 @@ export const BatchActionBar: React.FC = () => {
   return (
     <>
       <div
-        className="batch-action-bar fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-4 py-2.5 rounded-2xl shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-200"
+        className="batch-action-bar fixed bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-3 py-2 rounded-2xl shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-200"
         style={{
-          background: 'rgba(18, 20, 29, 0.94)',
+          background: 'rgba(16, 18, 26, 0.97)',
           backdropFilter: 'blur(24px)',
           WebkitBackdropFilter: 'blur(24px)',
-          border: '1px solid rgba(154, 144, 255, 0.4)',
-          boxShadow: '0 16px 40px rgba(0, 0, 0, 0.5), 0 0 24px rgba(154, 144, 255, 0.2)',
+          border: '1px solid rgba(255,255,255,0.1)',
+          boxShadow: '0 12px 32px rgba(0,0,0,0.55)',
         }}
       >
         {/* Count Badge */}

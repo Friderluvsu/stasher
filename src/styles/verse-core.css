@@ -103,11 +103,11 @@ body[data-platform="win32"] .workspace-frame {
 .brand-row {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 0 12px 28px;
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: -0.04em;
+  gap: 8px;
+  padding: 0 6px 14px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 .brand-row img {

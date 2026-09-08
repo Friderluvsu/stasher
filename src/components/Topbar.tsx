@@ -118,6 +118,7 @@ export const Topbar: React.FC = () => {
             </span>
           )}
         </button>
+
       </div>
 
       {/* Search Input (visible on MIDI & Sounds tabs) */}
