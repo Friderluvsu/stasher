@@ -1,6 +1,7 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, memo } from 'react';
 import { api } from '../services/api';
 import { audioEngine } from '../services/audioEngine';
+import { useInterfaceStore } from '../state/interfaceStore';
 
 interface WaveformPreviewProps {
   soundId: number;
@@ -21,7 +22,7 @@ const getAudioCtx = () => {
 // Global cache to prevent re-fetching and re-decoding
 const peakCache = new Map<number, number[]>();
 
-export const WaveformPreview: React.FC<WaveformPreviewProps> = ({
+export const WaveformPreview: React.FC<WaveformPreviewProps> = memo(({
   soundId,
   isPlaying,
   tag,
@@ -35,18 +36,9 @@ export const WaveformPreview: React.FC<WaveformPreviewProps> = ({
   const [hoverX, setHoverX] = useState<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
-  // Determine colors based on tag
-  const getTheme = useCallback(() => {
-    const t = (tag || '').toLowerCase();
-    if (t.includes('808') || t === 'bass') return { played: '#ff6b81', unplayed: 'rgba(255,107,129,0.3)', glow: 'rgba(255,107,129,0.6)' };
-    if (t.includes('kick')) return { played: '#ff9f43', unplayed: 'rgba(255,159,67,0.3)', glow: 'rgba(255,159,67,0.6)' };
-    if (t.includes('snare') || t.includes('clap') || t.includes('rim')) return { played: '#feca57', unplayed: 'rgba(254,202,87,0.3)', glow: 'rgba(254,202,87,0.6)' };
-    if (t.includes('hat') || t.includes('crash')) return { played: '#48dbfb', unplayed: 'rgba(72,219,251,0.3)', glow: 'rgba(72,219,251,0.6)' };
-    if (t.includes('chord')) return { played: '#1dd1a1', unplayed: 'rgba(29,209,161,0.3)', glow: 'rgba(29,209,161,0.6)' };
-    if (t.includes('melody') || t.includes('lead') || t.includes('pluck')) return { played: '#a55eea', unplayed: 'rgba(165,94,234,0.3)', glow: 'rgba(165,94,234,0.6)' };
-    if (t.includes('perc')) return { played: '#54a0ff', unplayed: 'rgba(84,160,255,0.3)', glow: 'rgba(84,160,255,0.6)' };
-    return { played: '#9a90ff', unplayed: 'rgba(154,144,255,0.3)', glow: 'rgba(154,144,255,0.6)' };
-  }, [tag]);
+  // Drawn in the text colour (read from CSS); the theme is a dependency only to redraw when it flips.
+  const theme = useInterfaceStore((state) => state.theme);
+  const isRu = useInterfaceStore((state) => state.language) === 'ru';
 
   // 1. Intersection Observer to only load when visible
   useEffect(() => {
@@ -109,7 +101,8 @@ export const WaveformPreview: React.FC<WaveformPreviewProps> = ({
       } catch (err) {
         console.warn(`Failed to decode waveform for sound ${soundId}:`, err);
         if (isMounted) {
-          const fake = new Array(80).fill(0).map(() => Math.random() * 0.5 + 0.1);
+          // A flat line says "no waveform" honestly; random bars looked like real audio.
+          const fake = new Array(80).fill(0.06);
           setPeaks(fake);
         }
       }
@@ -135,12 +128,13 @@ export const WaveformPreview: React.FC<WaveformPreviewProps> = ({
 
       ctx.clearRect(0, 0, width, height);
 
-      const theme = getTheme();
+      const ink = getComputedStyle(canvas).color || '#e6e6e7';
       const barWidth = width / peaks.length;
       const playheadX = isPlaying ? progress * width : 0;
 
       // Draw background / unplayed waveform
-      ctx.fillStyle = theme.unplayed;
+      ctx.fillStyle = ink;
+      ctx.globalAlpha = 0.32;
       for (let i = 0; i < peaks.length; i++) {
         const x = i * barWidth;
         const h = Math.max(2, peaks[i] * (height / 2 - 2));
@@ -155,7 +149,7 @@ export const WaveformPreview: React.FC<WaveformPreviewProps> = ({
         ctx.rect(0, 0, playheadX, height);
         ctx.clip();
 
-        ctx.fillStyle = theme.played;
+        ctx.globalAlpha = 0.95;
         for (let i = 0; i < peaks.length; i++) {
           const x = i * barWidth;
           const h = Math.max(2, peaks[i] * (height / 2 - 2));
@@ -163,36 +157,16 @@ export const WaveformPreview: React.FC<WaveformPreviewProps> = ({
           ctx.fillRect(x, y, Math.max(1, barWidth - 0.5), h * 2);
         }
 
-        // Subtle gradient glow behind played section
-        const grad = ctx.createLinearGradient(0, 0, playheadX, 0);
-        grad.addColorStop(0, 'rgba(255,255,255,0.01)');
-        grad.addColorStop(1, theme.unplayed);
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, playheadX, height);
-
         ctx.restore();
 
-        // Vertical Playhead Line
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 1.5;
-        ctx.shadowColor = theme.glow;
-        ctx.shadowBlur = 8;
-        ctx.beginPath();
-        ctx.moveTo(playheadX, 0);
-        ctx.lineTo(playheadX, height);
-        ctx.stroke();
-        ctx.shadowBlur = 0;
-
-        // Glowing playhead indicator handle at top
-        ctx.fillStyle = '#ffffff';
-        ctx.beginPath();
-        ctx.arc(playheadX, 2.5, 2.5, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.globalAlpha = 0.9;
+        ctx.fillRect(Math.round(playheadX) - 0.5, 0, 1.5, height);
       }
 
       // Draw Hover Indicator Line
       if (isHovered && hoverX !== null && !isDragging) {
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.strokeStyle = ink;
+        ctx.globalAlpha = 0.4;
         ctx.lineWidth = 1;
         ctx.setLineDash([2, 2]);
         ctx.beginPath();
@@ -200,14 +174,11 @@ export const WaveformPreview: React.FC<WaveformPreviewProps> = ({
         ctx.lineTo(hoverX, height);
         ctx.stroke();
         ctx.setLineDash([]);
-
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-        ctx.beginPath();
-        ctx.arc(hoverX, 2.5, 2, 0, Math.PI * 2);
-        ctx.fill();
       }
+      ctx.globalAlpha = 1;
     },
-    [peaks, getTheme, isPlaying, isHovered, hoverX, isDragging]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [peaks, theme, isPlaying, isHovered, hoverX, isDragging]
   );
 
   // Setup HiDPI Canvas Scaling
@@ -233,7 +204,7 @@ export const WaveformPreview: React.FC<WaveformPreviewProps> = ({
     let animationId: number;
     if (isPlaying && peaks) {
       const tick = () => {
-        const progress = audioEngine.getPlaybackProgress(soundId);
+        const progress = audioEngine.getPlaybackProgress('sound', soundId);
         renderCanvas(progress);
         animationId = requestAnimationFrame(tick);
       };
@@ -299,19 +270,11 @@ export const WaveformPreview: React.FC<WaveformPreviewProps> = ({
   return (
     <div
       ref={containerRef}
-      className="w-28 h-8 flex items-center justify-center relative flex-shrink-0 select-none group"
-      title="Click or drag waveform to seek"
+      className="wave-preview w-28 h-8"
+      title={isRu ? 'Нажмите или ведите, чтобы перемотать' : 'Click or drag to seek'}
     >
       {!peaks ? (
-        <div className="flex gap-[2px] w-full h-full items-center opacity-20 px-2">
-          {[1, 2, 3, 4, 5, 6].map((i) => (
-            <div
-              key={i}
-              className="flex-1 bg-white/40 h-1/2 rounded-full animate-pulse"
-              style={{ animationDelay: `${i * 0.08}s` }}
-            />
-          ))}
-        </div>
+        <div className="w-full h-full rounded-md" style={{ background: 'color-mix(in srgb, var(--text) 4%, transparent)' }} />
       ) : (
         <canvas
           ref={canvasRef}
@@ -320,23 +283,14 @@ export const WaveformPreview: React.FC<WaveformPreviewProps> = ({
           onMouseUp={handleMouseUp}
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
-          className={`w-full h-full absolute inset-0 block rounded-lg border transition-all duration-200 cursor-pointer ${
-            isPlaying
-              ? 'border-[var(--accent)] shadow-[0_0_14px_rgba(154,144,255,0.3)] ring-1 ring-[var(--accent)]'
-              : 'border-white/10 hover:border-white/25 hover:shadow-[0_0_8px_rgba(255,255,255,0.06)]'
-          }`}
-          style={{ width: '100%', height: '100%', background: 'rgba(12, 14, 20, 0.85)' }}
+          className={`absolute inset-0${isPlaying ? ' is-playing' : ''}`}
+          style={{ width: '100%', height: '100%' }}
         />
       )}
 
-      {/* Hover seek percentage cue */}
-      {isHovered && peaks && (
-        <div
-          className="absolute -top-5 left-1/2 -translate-x-1/2 px-1.5 py-0.5 rounded text-[9px] font-mono font-semibold bg-[#12141d] text-[var(--accent)] border border-white/10 pointer-events-none shadow-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap"
-        >
-          {hoverX !== null ? `Seek ${(hoverX / 112 * 100).toFixed(0)}%` : 'Seek'}
-        </div>
+      {isHovered && peaks && hoverX !== null && (
+        <div className="mini-roll-cue">{Math.round((hoverX / 112) * 100)}%</div>
       )}
     </div>
   );
-};
+});

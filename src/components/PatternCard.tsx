@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, memo, useCallback } from 'react';
 import type { PatternItem } from '../services/api';
 import { api } from '../services/api';
 import { useVaultStore } from '../state/vaultStore';
@@ -9,6 +9,7 @@ import { TagPickerPopover } from './TagPickerPopover';
 import { KitPickerPopover } from './KitPickerPopover';
 import { notify } from '../state/toastStore';
 import { generateMidiBase64 } from '../utils/midiBuilder';
+import { tagIcon } from '../utils/tags';
 
 import { dragService } from '../services/dragService';
 
@@ -23,19 +24,21 @@ function getBarsLabel(bars: number, isRu: boolean): string {
   return `${bars} тактов`;
 }
 
-export const PatternCard: React.FC<PatternCardProps> = ({ pattern }) => {
-  const {
-    playPattern,
-    stopPlayback,
-    currentlyPlayingId,
-    isPlaying,
-    updateItemTag,
-    kits,
-    activeKitId,
-    toggleKitPattern,
-    selectedPatternIds,
-    toggleSelectPattern,
-  } = useVaultStore();
+// Rows subscribe to the few store fields they render, so playback, selection or scan progress
+// elsewhere does not re-render (and redraw the piano roll of) every row in the list.
+export const PatternCard: React.FC<PatternCardProps> = memo(({ pattern }) => {
+  const playPattern = useVaultStore((s) => s.playPattern);
+  const stopPlayback = useVaultStore((s) => s.stopPlayback);
+  const updateItemTag = useVaultStore((s) => s.updateItemTag);
+  const toggleKitPattern = useVaultStore((s) => s.toggleKitPattern);
+  const toggleSelectPattern = useVaultStore((s) => s.toggleSelectPattern);
+  const isCurrentPlaying = useVaultStore((s) => s.isPlaying && s.currentlyPlayingKind === 'pattern' && s.currentlyPlayingId === pattern.id);
+  const isSelected = useVaultStore((s) => s.selectedPatternIds.includes(pattern.id));
+  const hasSelection = useVaultStore((s) => s.selectedPatternIds.length > 0);
+  const isInKit = useVaultStore((s) => {
+    const kit = s.kits.find((k) => k.id === s.activeKitId) || s.kits[0];
+    return kit ? kit.patterns.some((p) => p.id === pattern.id) : false;
+  });
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isKitMenuOpen, setIsKitMenuOpen] = useState(false);
   const [isTagMenuOpen, setIsTagMenuOpen] = useState(false);
@@ -46,13 +49,22 @@ export const PatternCard: React.FC<PatternCardProps> = ({ pattern }) => {
   const language = useInterfaceStore((state) => state.language);
   const isRu = language === 'ru';
 
-  const isCurrentPlaying = isPlaying && currentlyPlayingId === pattern.id;
-  const isSelected = selectedPatternIds.includes(pattern.id);
-  const activeKit = kits.find((k) => k.id === activeKitId) || kits[0];
-  const isInKit = activeKit ? activeKit.patterns.some((p) => p.id === pattern.id) : false;
+  const closeTagMenu = useCallback(() => setIsTagMenuOpen(false), []);
+  const closeKitMenu = useCallback(() => setIsKitMenuOpen(false), []);
+  const closeEdit = useCallback(() => setIsEditOpen(false), []);
+
+  const handleTagChange = async (newTag: string) => {
+    try {
+      await updateItemTag('pattern', pattern.id, newTag);
+      notify.success(isRu ? `Категория: ${newTag}` : `Category: ${newTag}`, 'MIDI Vault');
+    } catch {
+      notify.error(isRu ? 'Категория не сохранилась. Попробуйте ещё раз.' : 'Category was not saved. Try again.', 'MIDI Vault');
+    }
+  };
 
   const handleDragStart = (e: React.DragEvent) => {
-    const ids = isSelected && selectedPatternIds.length > 0 ? selectedPatternIds : [pattern.id];
+    const selected = useVaultStore.getState().selectedPatternIds;
+    const ids = isSelected && selected.length > 0 ? selected : [pattern.id];
     dragService.startDrag({
       type: 'pattern',
       id: pattern.id,
@@ -95,49 +107,18 @@ export const PatternCard: React.FC<PatternCardProps> = ({ pattern }) => {
     dragService.endDrag();
   };
 
-  const getTagStyle = (tag: string) => {
-    const t = tag.toLowerCase();
-    if (t.includes('808') || t === 'bass') {
-      return { background: 'rgba(255, 107, 129, 0.16)', color: '#ff6b81', border: '1px solid rgba(255, 107, 129, 0.35)' };
-    }
-    if (t.includes('kick')) {
-      return { background: 'rgba(255, 159, 67, 0.16)', color: '#ff9f43', border: '1px solid rgba(255, 159, 67, 0.35)' };
-    }
-    if (t.includes('snare') || t.includes('clap') || t.includes('rim')) {
-      return { background: 'rgba(254, 202, 87, 0.16)', color: '#feca57', border: '1px solid rgba(254, 202, 87, 0.35)' };
-    }
-    if (t.includes('hat') || t.includes('crash')) {
-      return { background: 'rgba(72, 219, 251, 0.16)', color: '#48dbfb', border: '1px solid rgba(72, 219, 251, 0.35)' };
-    }
-    if (t.includes('chord')) {
-      return { background: 'rgba(113, 200, 159, 0.16)', color: '#71c89f', border: '1px solid rgba(113, 200, 159, 0.35)' };
-    }
-    if (t.includes('melody') || t.includes('lead') || t.includes('pluck')) {
-      return { background: 'rgba(154, 144, 255, 0.18)', color: 'var(--accent)', border: '1px solid rgba(154, 144, 255, 0.4)' };
-    }
-    if (t.includes('perc')) {
-      return { background: 'rgba(84, 160, 255, 0.16)', color: '#54a0ff', border: '1px solid rgba(84, 160, 255, 0.35)' };
-    }
-    return { background: 'color-mix(in srgb, var(--text) 8%, transparent)', color: 'var(--muted)', border: '1px solid var(--line)' };
-  };
-
-  const tagStyle = getTagStyle(pattern.tag);
-
   return (
     <div
       draggable
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
-      className={`glass-card spotlight-card pattern-card p-3 px-4 flex items-center gap-3.5 cursor-grab transition-all ${
-        isSelected
-          ? 'border-[var(--accent)] bg-[rgba(154,144,255,0.12)] shadow-[0_0_24px_rgba(154,144,255,0.22)]'
-          : isCurrentPlaying
-          ? 'border-[#9a90ff]/50 shadow-[0_0_24px_rgba(154,144,255,0.18)]'
-          : ''
-      }`}
-      style={{
-        borderRadius: 'var(--radius-card, 20px)',
+      onClick={(e) => {
+        // Once something is selected, a plain click on the row toggles it: faster than aiming for the checkbox.
+        if (hasSelection && !(e.target as HTMLElement).closest('button, a, canvas')) toggleSelectPattern(pattern.id);
       }}
+      className={`group glass-card pattern-card p-3 px-4 flex items-center gap-3.5 cursor-grab ${
+        isSelected ? 'is-selected' : isCurrentPlaying ? 'is-playing' : ''
+      }`}
     >
       {/* Checkbox for batch selection */}
       <button
@@ -146,19 +127,11 @@ export const PatternCard: React.FC<PatternCardProps> = ({ pattern }) => {
           e.stopPropagation();
           toggleSelectPattern(pattern.id);
         }}
-        className="flex-shrink-0 cursor-pointer transition-all flex items-center justify-center"
-        style={{
-          width: 15,
-          height: 15,
-          borderRadius: 4,
-          border: isSelected ? 'none' : '1.5px solid rgba(255,255,255,0.18)',
-          background: isSelected ? 'var(--accent)' : 'rgba(255,255,255,0.04)',
-        }}
+        className={`row-check${isSelected ? ' is-checked' : ''}`}
+        aria-pressed={isSelected}
         title={isSelected ? (isRu ? 'Снять выделение' : 'Deselect') : (isRu ? 'Выбрать' : 'Select')}
       >
-        {isSelected && (
-          <i className="ti ti-check" style={{ fontSize: 10, color: '#0e1017', lineHeight: 1 }} />
-        )}
+        {isSelected && <i className="ti ti-check" aria-hidden="true" />}
       </button>
 
       {/* Drag grip handle */}
@@ -172,18 +145,13 @@ export const PatternCard: React.FC<PatternCardProps> = ({ pattern }) => {
           e.stopPropagation();
           isCurrentPlaying ? stopPlayback() : playPattern(pattern);
         }}
-        className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 transition-all cursor-pointer"
-        style={{
-          background: isCurrentPlaying ? 'var(--accent)' : 'color-mix(in srgb, var(--text) 8%, transparent)',
-          color: isCurrentPlaying ? '#0b0d13' : 'var(--text)',
-          boxShadow: isCurrentPlaying ? '0 0 16px rgba(154,144,255,0.45)' : 'none',
-        }}
+        className={`row-play${isCurrentPlaying ? ' is-active' : ''}`}
         type="button"
-        title={isCurrentPlaying ? 'Stop playback' : 'Play MIDI preview'}
+        title={isCurrentPlaying ? (isRu ? 'Остановить' : 'Stop') : (isRu ? 'Прослушать' : 'Play')}
       >
         <i
           className={`ti ${isCurrentPlaying ? 'ti-player-stop' : 'ti-player-play'}`}
-          style={{ fontSize: 16, marginLeft: isCurrentPlaying ? 0 : 2 }}
+          style={{ marginLeft: isCurrentPlaying ? 0 : 2 }}
           aria-hidden="true"
         />
       </button>
@@ -204,29 +172,33 @@ export const PatternCard: React.FC<PatternCardProps> = ({ pattern }) => {
                 e.stopPropagation();
                 setIsTagMenuOpen(!isTagMenuOpen);
               }}
-              className="text-[10px] font-bold px-2.5 py-[3px] rounded-full inline-flex items-center gap-1 hover:brightness-125 transition-all cursor-pointer"
-              style={tagStyle}
-              title={isRu ? "Нажмите, чтобы сменить тег" : "Click to change tag"}
+              className="tag-chip"
+              aria-haspopup="dialog"
+              aria-expanded={isTagMenuOpen}
+              title={isRu ? 'Сменить категорию' : 'Change category'}
             >
+              <i className={`ti ${tagIcon(pattern.tag)}`} aria-hidden="true" />
               <span>{pattern.tag}</span>
-              <i className="ti ti-chevron-down text-[8px] opacity-70" />
+              <i className="ti ti-chevron-down tag-chip-caret" aria-hidden="true" />
             </button>
 
             <TagPickerPopover
               isOpen={isTagMenuOpen}
-              onClose={() => setIsTagMenuOpen(false)}
+              onClose={closeTagMenu}
               currentTag={pattern.tag}
               anchorEl={tagBadgeRef.current}
-              onSelectTag={(newTag) => {
-                updateItemTag('pattern', pattern.id, newTag);
-                notify.success(isRu ? `Тег изменен на ${newTag}` : `Tag changed to ${newTag}`, 'MIDI Vault');
-              }}
+              onSelectTag={handleTagChange}
             />
           </div>
         </div>
         <div className="text-[11px] text-[var(--muted)] mt-0.5 truncate flex items-center gap-1.5">
-          <span className="font-medium text-[var(--text)] opacity-70">{pattern.channel_name}</span>
-          <span className="opacity-30">•</span>
+          {/* FL often names the pattern after its channel; don't print the same word twice. */}
+          {pattern.channel_name && pattern.channel_name !== pattern.pattern_name && (
+            <>
+              <span className="font-medium text-[var(--text)] opacity-70">{pattern.channel_name}</span>
+              <span className="opacity-30">•</span>
+            </>
+          )}
           <span className="opacity-80">{pattern.project_title}</span>
         </div>
       </div>
@@ -244,7 +216,8 @@ export const PatternCard: React.FC<PatternCardProps> = ({ pattern }) => {
       </div>
 
       {/* Metadata */}
-      <div className="text-right text-[11px] font-mono flex-shrink-0">
+      {/* Fixed width: a content-sized column shifted the mini roll from row to row ("· C#m" vs "· —"). */}
+      <div className="text-right text-[11px] tabular-nums flex-shrink-0 w-[88px] whitespace-nowrap">
         <div className="text-[var(--text)] font-semibold">{pattern.tempo} BPM</div>
         <div className="text-[var(--muted)] text-[10px] mt-0.5">
           {getBarsLabel(pattern.bars, isRu)} · {pattern.key_root}
@@ -255,13 +228,7 @@ export const PatternCard: React.FC<PatternCardProps> = ({ pattern }) => {
       <div className="flex items-center gap-1.5 flex-shrink-0">
         {/* Kit Split Button: Left (+Кит/В ките), Right (⌄ Dropdown) */}
         <div className="relative inline-flex items-center" ref={kitButtonRef}>
-          <div
-            className={`inline-flex items-center rounded-full border transition-all ${
-              isInKit
-                ? 'bg-[var(--accent-soft)] border-[rgba(154,144,255,0.4)] shadow-[0_0_12px_rgba(154,144,255,0.2)]'
-                : 'bg-transparent border-[var(--line)] hover:border-white/20 hover:bg-white/[0.04]'
-            }`}
-          >
+          <div className={`kit-split${isInKit ? ' is-in-kit' : ''}`}>
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -269,25 +236,21 @@ export const PatternCard: React.FC<PatternCardProps> = ({ pattern }) => {
                 if (!isInKit) notify.success(isRu ? `Добавлено в кит` : `Added to kit`, 'Kit Builder');
               }}
               title={isInKit ? (isRu ? 'Удалить из набора' : 'Remove from kit') : (isRu ? 'Добавить в набор' : 'Add to kit')}
-              className={`h-[30px] pl-3 pr-2 inline-flex items-center gap-1.5 text-[11px] font-semibold transition-colors cursor-pointer ${
-                isInKit ? 'text-[var(--accent)]' : 'text-[var(--muted)] hover:text-[var(--text)]'
-              }`}
+              style={{ padding: '0 8px 0 11px' }}
               type="button"
             >
               <i className={`ti ${isInKit ? 'ti-check' : 'ti-plus'} text-[12px]`} aria-hidden="true" />
               <span>{isInKit ? (isRu ? 'В ките' : 'In Kit') : (isRu ? 'Кит' : 'Kit')}</span>
             </button>
 
-            <div className={`w-[1px] h-[14px] ${isInKit ? 'bg-[rgba(154,144,255,0.3)]' : 'bg-[var(--line)]'}`} />
+            <div className="kit-split-divider" />
 
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 setIsKitMenuOpen(!isKitMenuOpen);
               }}
-              className={`h-[30px] px-2 inline-flex items-center justify-center transition-colors cursor-pointer ${
-                isInKit ? 'text-[var(--accent)] hover:text-white' : 'text-[var(--muted)] hover:text-[var(--text)]'
-              }`}
+              style={{ padding: '0 8px' }}
               title={isRu ? 'Выбрать набор...' : 'Select kit...'}
               type="button"
             >
@@ -297,7 +260,7 @@ export const PatternCard: React.FC<PatternCardProps> = ({ pattern }) => {
 
           <KitPickerPopover
             isOpen={isKitMenuOpen}
-            onClose={() => setIsKitMenuOpen(false)}
+            onClose={closeKitMenu}
             itemId={pattern.id}
             itemType="pattern"
             anchorEl={kitButtonRef.current}
@@ -310,7 +273,7 @@ export const PatternCard: React.FC<PatternCardProps> = ({ pattern }) => {
             e.stopPropagation();
             setIsEditOpen(true);
           }}
-          className="w-[30px] h-[30px] rounded-full grid place-items-center text-[var(--muted)] hover:text-[var(--text)] hover:bg-white/[0.08] transition-colors cursor-pointer border border-transparent hover:border-[var(--line)]"
+          className="row-action"
           title={isRu ? "Редактировать название и тег" : "Edit Name & Tag"}
           type="button"
         >
@@ -322,7 +285,7 @@ export const PatternCard: React.FC<PatternCardProps> = ({ pattern }) => {
           href={api.getMidiUrl(pattern.id)}
           download={`${pattern.pattern_name || 'pattern'}.mid`}
           onClick={(e) => e.stopPropagation()}
-          className="w-[30px] h-[30px] rounded-full grid place-items-center text-[var(--muted)] hover:text-[var(--text)] hover:bg-white/[0.08] transition-colors cursor-pointer border border-transparent hover:border-[var(--line)]"
+          className="row-action"
           title={isRu ? 'Скачать MIDI' : 'Download MIDI'}
         >
           <i className="ti ti-download text-[13px]" aria-hidden="true" />
@@ -331,7 +294,7 @@ export const PatternCard: React.FC<PatternCardProps> = ({ pattern }) => {
 
       <EditItemModal
         isOpen={isEditOpen}
-        onClose={() => setIsEditOpen(false)}
+        onClose={closeEdit}
         itemType="pattern"
         itemId={pattern.id}
         initialName={pattern.pattern_name}
@@ -339,4 +302,4 @@ export const PatternCard: React.FC<PatternCardProps> = ({ pattern }) => {
       />
     </div>
   );
-};
+});

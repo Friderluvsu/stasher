@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useVaultStore } from '../state/vaultStore';
 import { useInterfaceStore } from '../state/interfaceStore';
 import { ProfileMenu } from './ProfileMenu';
@@ -8,16 +9,41 @@ export const Topbar: React.FC = () => {
   const {
     activeTab, setActiveTab,
     searchQuery, setSearchQuery,
-     totalPatterns, totalSounds,
-    kits, activeKitId,
-  } = useVaultStore();
+    totalPatterns, totalSounds,
+    totalKitItems,
+  } = useVaultStore(useShallow((s) => {
+    const kit = s.kits.find((k) => k.id === s.activeKitId) || s.kits[0];
+    return {
+      activeTab: s.activeTab, setActiveTab: s.setActiveTab,
+      searchQuery: s.searchQuery, setSearchQuery: s.setSearchQuery,
+      totalPatterns: s.totalPatterns, totalSounds: s.totalSounds,
+      totalKitItems: (kit?.sounds.length || 0) + (kit?.patterns.length || 0),
+    };
+  }));
 
   const language = useInterfaceStore((state) => state.language);
   const isRu = language === 'ru';
   const [profileOpen, setProfileOpen] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const isLibraryTab = activeTab === 'midi' || activeTab === 'sounds';
 
-  const activeKit = kits.find(k => k.id === activeKitId) || kits[0];
-  const totalKitItems = (activeKit?.sounds.length || 0) + (activeKit?.patterns.length || 0);
+  // "/" or Cmd/Ctrl+F jumps to search from anywhere in the library.
+  useEffect(() => {
+    if (!isLibraryTab) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isTyping = target?.closest('input, textarea, select, [contenteditable="true"]');
+      const isFind = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f';
+      if (isFind || (e.key === '/' && !isTyping && !e.metaKey && !e.ctrlKey)) {
+        e.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isLibraryTab]);
+
 
   
   const [isKitDropTarget, setIsKitDropTarget] = useState(false);
@@ -95,9 +121,18 @@ export const Topbar: React.FC = () => {
         </button>
 
         <button
+          className={activeTab === 'visualizer' ? 'is-active' : ''}
+          onClick={() => setActiveTab('visualizer')}
+          type="button"
+        >
+          <i className="ti ti-chart-dots-3" aria-hidden="true" />
+          <span>{isRu ? 'Визуализатор' : 'Visualizer'}</span>
+        </button>
+
+        <button
           className={`${activeTab === 'kit' ? 'is-active' : ''} ${
             isKitDropTarget
-              ? 'ring-2 ring-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)] scale-105 shadow-[0_0_16px_rgba(154,144,255,0.4)]'
+              ? 'ring-2 ring-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]'
               : ''
           }`}
           onClick={() => setActiveTab('kit')}
@@ -110,10 +145,7 @@ export const Topbar: React.FC = () => {
           <i className="ti ti-archive" aria-hidden="true" />
           <span>{isRu ? 'Кит Билдер' : 'Kit Builder'}</span>
           {totalKitItems > 0 && (
-            <span
-              className="navigation-count"
-              style={{ background: 'var(--accent)', color: '#0b0d13', fontWeight: 700 }}
-            >
+            <span className="navigation-count is-strong">
               {totalKitItems}
             </span>
           )}
@@ -122,7 +154,7 @@ export const Topbar: React.FC = () => {
       </div>
 
       {/* Search Input (visible on MIDI & Sounds tabs) */}
-      {activeTab !== 'kit' && (
+      {isLibraryTab && (
         <div style={{ position: 'relative', width: 260, flexShrink: 0 }}>
           <i
             className="ti ti-search"
@@ -138,9 +170,18 @@ export const Topbar: React.FC = () => {
             aria-hidden="true"
           />
           <input
+            ref={searchRef}
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                if (searchQuery) setSearchQuery('');
+                e.currentTarget.blur();
+              }
+            }}
+            aria-label={isRu ? 'Поиск' : 'Search'}
+            spellCheck={false}
             placeholder={
               activeTab === 'sounds'
                 ? (isRu ? 'Поиск по звукам…' : 'Search sounds…')
@@ -151,11 +192,27 @@ export const Topbar: React.FC = () => {
               width: '100%',
               height: 34,
               paddingLeft: 34,
-              paddingRight: 12,
+              paddingRight: 34,
               fontSize: 12,
               fontWeight: 500,
             }}
           />
+          {searchQuery ? (
+            <button
+              type="button"
+              className="search-clear"
+              onClick={() => {
+                setSearchQuery('');
+                searchRef.current?.focus();
+              }}
+              aria-label={isRu ? 'Очистить поиск' : 'Clear search'}
+              title={isRu ? 'Очистить (Esc)' : 'Clear (Esc)'}
+            >
+              <i className="ti ti-x" aria-hidden="true" />
+            </button>
+          ) : (
+            <kbd className="search-hint" aria-hidden="true">/</kbd>
+          )}
         </div>
       )}
 

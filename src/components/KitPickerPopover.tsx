@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
+import { useShallow } from 'zustand/react/shallow';
 import { useVaultStore } from '../state/vaultStore';
 import { useInterfaceStore } from '../state/interfaceStore';
 
@@ -11,7 +12,7 @@ interface KitPickerPopoverProps {
   anchorEl?: HTMLElement | null;
 }
 
-export const KitPickerPopover: React.FC<KitPickerPopoverProps> = ({
+const KitPickerMenu: React.FC<KitPickerPopoverProps> = ({
   isOpen,
   onClose,
   itemId,
@@ -19,7 +20,21 @@ export const KitPickerPopover: React.FC<KitPickerPopoverProps> = ({
   anchorEl,
 }) => {
   const popoverRef = useRef<HTMLDivElement>(null);
-  const { kits, toggleKitPattern, toggleKitSound, createKit, patterns, sounds } = useVaultStore();
+  const {
+    kits,
+    toggleKitPattern,
+    toggleKitSound,
+    createKit,
+    patterns,
+    sounds,
+  } = useVaultStore(useShallow((s) => ({
+    kits: s.kits,
+    toggleKitPattern: s.toggleKitPattern,
+    toggleKitSound: s.toggleKitSound,
+    createKit: s.createKit,
+    patterns: s.patterns,
+    sounds: s.sounds,
+  })));
   const language = useInterfaceStore((state) => state.language);
   const isRu = language === 'ru';
   const [coords, setCoords] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
@@ -121,11 +136,8 @@ export const KitPickerPopover: React.FC<KitPickerPopoverProps> = ({
         left: coords.left,
         width: 220,
         padding: '10px',
-        borderRadius: 18,
+        borderRadius: 'var(--radius-panel)',
         zIndex: 999999,
-        backgroundColor: '#161b26',
-        border: '1px solid rgba(255, 255, 255, 0.16)',
-        boxShadow: '0 24px 60px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.1)',
         pointerEvents: 'auto',
         display: 'flex',
         flexDirection: 'column',
@@ -135,13 +147,11 @@ export const KitPickerPopover: React.FC<KitPickerPopoverProps> = ({
     >
       <div
         style={{
-          fontSize: 10,
-          fontWeight: 700,
-          textTransform: 'uppercase',
-          letterSpacing: '0.06em',
+          fontSize: 11,
+          fontWeight: 600,
           color: 'var(--muted)',
-          padding: '2px 6px 6px',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+          padding: '2px 4px 6px 6px',
+          borderBottom: '1px solid var(--line)',
           marginBottom: 4,
           display: 'flex',
           justifyContent: 'space-between',
@@ -169,38 +179,17 @@ export const KitPickerPopover: React.FC<KitPickerPopoverProps> = ({
               key={k.id}
               type="button"
               onClick={() => handleToggle(k.id)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '7px 9px',
-                borderRadius: 8,
-                fontSize: 11.5,
-                fontWeight: inThisKit ? 700 : 500,
-                color: inThisKit ? 'var(--accent)' : 'var(--text)',
-                background: inThisKit ? 'var(--accent-soft)' : 'rgba(255, 255, 255, 0.04)',
-                border: inThisKit ? '1px solid rgba(154, 144, 255, 0.35)' : '1px solid transparent',
-                cursor: 'pointer',
-                textAlign: 'left',
-                transition: 'all 0.15s ease',
-              }}
-              onMouseEnter={(e) => {
-                if (!inThisKit) e.currentTarget.style.background = 'rgba(255, 255, 255, 0.09)';
-              }}
-              onMouseLeave={(e) => {
-                if (!inThisKit) e.currentTarget.style.background = 'rgba(255, 255, 255, 0.04)';
-              }}
+              className={`menu-option${inThisKit ? ' is-current' : ''}`}
+              aria-pressed={inThisKit}
             >
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {k.name}
-              </span>
-              {inThisKit && <i className="ti ti-check" style={{ color: 'var(--accent)', fontSize: 12 }} />}
+              <span>{k.name}</span>
+              {inThisKit && <i className="ti ti-check" style={{ fontSize: 12 }} aria-hidden="true" />}
             </button>
           );
         })}
       </div>
 
-      <div style={{ height: 1, background: 'rgba(255, 255, 255, 0.08)', margin: '4px 0' }} />
+      <div style={{ height: 1, background: 'var(--line)', margin: '4px 0' }} />
 
       {isCreating ? (
         <form onSubmit={handleCreateNew} style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '2px' }}>
@@ -266,3 +255,7 @@ export const KitPickerPopover: React.FC<KitPickerPopoverProps> = ({
 
   return ReactDOM.createPortal(content, document.body);
 };
+
+// Every library row owns a picker; only an open one subscribes to the store, so closed pickers cost nothing on store updates.
+export const KitPickerPopover: React.FC<KitPickerPopoverProps> = (props) =>
+  props.isOpen ? <KitPickerMenu {...props} /> : null;

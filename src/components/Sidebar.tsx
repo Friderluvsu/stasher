@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useVaultStore } from '../state/vaultStore';
 import { useInterfaceStore } from '../state/interfaceStore';
 import { notify } from '../state/toastStore';
@@ -6,46 +7,38 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { api } from '../services/api';
 import { dragService } from '../services/dragService';
 import type { ProjectItem } from '../services/api';
+import { TAGS, tagIcon } from '../utils/tags';
 
-const TAG_ICONS: Record<string, string> = {
-  All: 'ti-category',
-  '808': 'ti-flame',
-  Kick: 'ti-circle-dot',
-  Snare: 'ti-circle-dashed',
-  Clap: 'ti-hand-stop',
-  'Hi-Hat': 'ti-sparkles',
-  'Open Hat': 'ti-ripple',
-  Rim: 'ti-crosshair',
-  Perc: 'ti-grain',
-  Tom: 'ti-circles',
-  Crash: 'ti-sun',
-  Bass: 'ti-wave-sine',
-  Chords: 'ti-piano',
-  Melody: 'ti-music',
-  Lead: 'ti-wand',
-  Pluck: 'ti-guitar-pick',
-  Vox: 'ti-microphone',
-  FX: 'ti-bolt',
-  Other: 'ti-dots',
-};
-
-const CATEGORIES = [
-  'All', '808', 'Kick', 'Snare', 'Clap', 'Hi-Hat', 'Open Hat',
-  'Rim', 'Perc', 'Tom', 'Crash', 'Bass', 'Chords', 'Melody',
-  'Lead', 'Pluck', 'Vox', 'FX', 'Other'
-];
+const CATEGORIES = ['All', ...TAGS];
 
 export const Sidebar: React.FC = () => {
   const {
     activeTab,
-    selectedTag, setSelectedTag,
-    totalPatterns, totalSounds,
-    patternTagCounts, soundTagCounts,
-    projects, selectedProjectId, setSelectedProjectId,
+    selectedTag,
+    setSelectedTag,
+    totalPatterns,
+    totalSounds,
+    patternTagCounts,
+    soundTagCounts,
+    projects,
+    selectedProjectId,
+    setSelectedProjectId,
+    setActiveTab,
     deleteProject,
-    fetchSounds,
-    fetchPatterns
-  } = useVaultStore();
+  } = useVaultStore(useShallow((s) => ({
+    activeTab: s.activeTab,
+    selectedTag: s.selectedTag,
+    setSelectedTag: s.setSelectedTag,
+    totalPatterns: s.totalPatterns,
+    totalSounds: s.totalSounds,
+    patternTagCounts: s.patternTagCounts,
+    soundTagCounts: s.soundTagCounts,
+    projects: s.projects,
+    selectedProjectId: s.selectedProjectId,
+    setSelectedProjectId: s.setSelectedProjectId,
+    setActiveTab: s.setActiveTab,
+    deleteProject: s.deleteProject,
+  })));
 
   const language = useInterfaceStore((state) => state.language);
   const isRu = language === 'ru';
@@ -54,6 +47,9 @@ export const Sidebar: React.FC = () => {
   const [dragOverCategory, setDragOverCategory] = useState<string | null>(null);
 
   const isSoundsTab = activeTab === 'sounds';
+  // The Visualizer does not filter by category, so there the list is a shortcut into the MIDI library instead of a dead control.
+  const opensLibrary = activeTab === 'visualizer';
+  const showInLibrary = () => { if (opensLibrary) setActiveTab('midi'); };
   const tagCounts = isSoundsTab ? soundTagCounts : patternTagCounts;
   const total = isSoundsTab ? totalSounds : totalPatterns;
 
@@ -201,7 +197,7 @@ export const Sidebar: React.FC = () => {
 
           {CATEGORIES.map((cat) => {
             const count = cat === 'All' ? total : (tagCounts[cat] || 0);
-            const isActive = selectedTag === cat && selectedProjectId === null;
+            const isActive = !opensLibrary && selectedTag === cat && selectedProjectId === null;
             const isDropTarget = dragOverCategory === cat;
             const displayLabel = cat === 'All' ? (isRu ? 'Все' : 'All') : cat;
             return (
@@ -209,10 +205,10 @@ export const Sidebar: React.FC = () => {
                 key={cat}
                 className={`${isActive ? 'is-active' : ''} ${
                   isDropTarget
-                    ? 'ring-2 ring-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)] shadow-[0_0_18px_rgba(154,144,255,0.4)] scale-[1.03] z-10'
+                    ? 'ring-2 ring-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)] z-10'
                     : ''
                 }`}
-                onClick={() => { setSelectedProjectId(null); setSelectedTag(cat); }}
+                onClick={() => { setSelectedProjectId(null); setSelectedTag(cat); showInLibrary(); }}
                 onDragOver={(e) => handleCategoryDragOver(e, cat)}
                 onDragLeave={(e) => handleCategoryDragLeave(e, cat)}
                 onDrop={(e) => handleCategoryDrop(e, cat)}
@@ -225,7 +221,7 @@ export const Sidebar: React.FC = () => {
                     : `Category ${displayLabel} (drag & drop here to assign)`
                 }
               >
-                <i className={`ti ${TAG_ICONS[cat] || 'ti-dots'} pointer-events-none`} aria-hidden="true" />
+                <i className={`ti ${tagIcon(cat)} pointer-events-none`} aria-hidden="true" />
                 <span className="pointer-events-none">{displayLabel}</span>
                 {isDropTarget ? (
                   <i className="ti ti-corner-down-left text-xs text-[var(--accent)] animate-pulse pointer-events-none" />
@@ -243,18 +239,18 @@ export const Sidebar: React.FC = () => {
                 {isRu ? 'Проекты FLP' : 'FLP Projects'}
               </span>
               {projects.map((proj) => {
-                const isActive = selectedProjectId === proj.id;
+                const isActive = !opensLibrary && selectedProjectId === proj.id;
                 return (
                   <div
                     key={proj.id}
-                    className={`group relative flex items-center w-full rounded-[12px] transition-all ${
-                      isActive ? 'bg-[var(--panel-strong)] border border-[var(--line)]' : 'hover:bg-white/[0.04]'
+                    className={`group relative flex items-center w-full rounded-[8px] transition-all ${
+                      isActive ? 'bg-[var(--panel-strong)] border border-[var(--line)]' : 'hover:bg-[var(--accent-soft)]'
                     }`}
                     style={{ minHeight: 38 }}
                   >
                     <button
                       className="flex-1 min-w-0 flex items-center gap-2.5 px-2.5 text-left bg-transparent border-0 cursor-pointer"
-                      onClick={() => setSelectedProjectId(isActive ? null : proj.id)}
+                      onClick={() => { setSelectedProjectId(isActive ? null : proj.id); showInLibrary(); }}
                       type="button"
                       title={proj.title}
                       style={{ color: isActive ? 'var(--text)' : 'var(--muted)', fontSize: '13.5px', fontWeight: 500 }}

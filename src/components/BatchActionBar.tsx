@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import ReactDOM from 'react-dom';
+import { useShallow } from 'zustand/react/shallow';
 import { useVaultStore } from '../state/vaultStore';
 import { useInterfaceStore } from '../state/interfaceStore';
 import { TagPickerPopover } from './TagPickerPopover';
@@ -22,7 +23,22 @@ export const BatchActionBar: React.FC = () => {
     kits,
     activeKitId,
     createKit,
-  } = useVaultStore();
+  } = useVaultStore(useShallow((s) => ({
+    activeTab: s.activeTab,
+    sounds: s.sounds,
+    patterns: s.patterns,
+    selectedSoundIds: s.selectedSoundIds,
+    selectedPatternIds: s.selectedPatternIds,
+    selectAllSounds: s.selectAllSounds,
+    selectAllPatterns: s.selectAllPatterns,
+    clearSelection: s.clearSelection,
+    batchDeleteSelected: s.batchDeleteSelected,
+    batchUpdateTagSelected: s.batchUpdateTagSelected,
+    batchAddSelectedToKit: s.batchAddSelectedToKit,
+    kits: s.kits,
+    activeKitId: s.activeKitId,
+    createKit: s.createKit,
+  })));
 
   const language = useInterfaceStore((state) => state.language);
   const isRu = language === 'ru';
@@ -44,8 +60,12 @@ export const BatchActionBar: React.FC = () => {
   const kitButtonRef = useRef<HTMLButtonElement>(null);
   const kitMenuRef = useRef<HTMLDivElement>(null);
 
+  // The bar acts on the MIDI/Sounds selections only; on other tabs (Kit, Visualizer) it must stay hidden and inert.
+  const barVisible = activeTab === 'midi' || activeTab === 'sounds';
+
   // Clear selection on Escape key
   useEffect(() => {
+    if (!barVisible) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && selectedCount > 0) {
         clearSelection();
@@ -53,7 +73,7 @@ export const BatchActionBar: React.FC = () => {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedCount, clearSelection]);
+  }, [barVisible, selectedCount, clearSelection]);
 
   // Position Kit Menu Popover above or below button
   useEffect(() => {
@@ -97,7 +117,7 @@ export const BatchActionBar: React.FC = () => {
     };
   }, [isKitMenuOpen]);
 
-  if (selectedCount === 0 || activeTab === 'kit') {
+  if (selectedCount === 0 || !barVisible) {
     return null;
   }
 
@@ -117,13 +137,13 @@ export const BatchActionBar: React.FC = () => {
       await batchUpdateTagSelected(tag);
       notify.success(
         isRu
-          ? `Группа ${selectedCount} элементов изменена на "${tag}"`
-          : `Changed category of ${selectedCount} items to "${tag}"`,
+          ? `Категория «${tag}» назначена: ${selectedCount}`
+          : `Category "${tag}" set on ${selectedCount} items`,
         'Stasher'
       );
     } catch {
       notify.error(
-        isRu ? 'Ошибка при смене группы' : 'Failed to update category',
+        isRu ? 'Категория не сохранилась. Попробуйте ещё раз.' : 'Category was not saved. Try again.',
         'Stasher'
       );
     }
@@ -181,24 +201,14 @@ export const BatchActionBar: React.FC = () => {
   return (
     <>
       <div
-        className="batch-action-bar fixed bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-3 py-2 rounded-2xl shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-200"
-        style={{
-          background: 'rgba(16, 18, 26, 0.97)',
-          backdropFilter: 'blur(24px)',
-          WebkitBackdropFilter: 'blur(24px)',
-          border: '1px solid rgba(255,255,255,0.1)',
-          boxShadow: '0 12px 32px rgba(0,0,0,0.55)',
-        }}
+        className="batch-action-bar glass-popover fixed bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-3 py-2 rounded-xl"
+        style={{ position: 'fixed' }}
+        role="toolbar"
+        aria-label={isRu ? 'Действия с выбранными' : 'Selection actions'}
       >
-        {/* Count Badge */}
-        <div className="flex items-center gap-2 pr-2 border-r border-white/10">
-          <div
-            className="w-6 h-6 rounded-lg grid place-items-center text-xs font-bold"
-            style={{ background: 'var(--accent)', color: '#0e1017' }}
-          >
-            {selectedCount}
-          </div>
-          <span className="text-xs font-semibold text-[var(--text)] whitespace-nowrap">
+        {/* Count */}
+        <div className="flex items-center gap-2 pr-2 border-r border-[var(--line)]">
+          <span className="text-xs font-semibold text-[var(--text)] whitespace-nowrap tabular-nums">
             {isRu ? `Выбрано: ${selectedCount}` : `${selectedCount} selected`}
           </span>
         </div>
@@ -214,7 +224,7 @@ export const BatchActionBar: React.FC = () => {
           <i
             className={`ti ${
               selectedCount === totalItemsCount ? 'ti-checkbox' : 'ti-square-check'
-            } text-sm text-[var(--accent)]`}
+            } text-sm text-[var(--muted)]`}
           />
           <span>
             {selectedCount === totalItemsCount
@@ -237,7 +247,7 @@ export const BatchActionBar: React.FC = () => {
             type="button"
             title={isRu ? 'Добавить выбранное в драм-кит' : 'Add selected to sound kit'}
           >
-            <i className="ti ti-folder-plus text-sm text-[var(--accent)]" />
+            <i className="ti ti-folder-plus text-sm text-[var(--muted)]" />
             <span>{isRu ? 'В кит' : 'Add to Kit'}</span>
             <i className="ti ti-chevron-down text-[10px] opacity-60" />
           </button>
@@ -253,8 +263,8 @@ export const BatchActionBar: React.FC = () => {
             type="button"
             title={isRu ? 'Сменить категорию/тег' : 'Change category / tag'}
           >
-            <i className="ti ti-tag text-sm text-[var(--accent)]" />
-            <span>{isRu ? 'Сменить группу' : 'Change Tag'}</span>
+            <i className="ti ti-tag text-sm text-[var(--muted)]" />
+            <span>{isRu ? 'Категория' : 'Category'}</span>
             <i className="ti ti-chevron-down text-[10px] opacity-60" />
           </button>
 
@@ -282,7 +292,8 @@ export const BatchActionBar: React.FC = () => {
         {/* Cancel / Clear Selection Button */}
         <button
           onClick={clearSelection}
-          className="w-7 h-7 rounded-full grid place-items-center text-white/50 hover:text-white hover:bg-white/10 transition-all cursor-pointer ml-1"
+          className="row-action ml-1"
+          style={{ opacity: 1, width: 28, height: 28 }}
           type="button"
           title={isRu ? 'Снять выделение (Esc)' : 'Clear selection (Esc)'}
         >
@@ -295,6 +306,7 @@ export const BatchActionBar: React.FC = () => {
         ReactDOM.createPortal(
           <div
             ref={kitMenuRef}
+            className="glass-popover"
             style={{
               position: 'fixed',
               top: kitMenuCoords.top,
@@ -302,19 +314,14 @@ export const BatchActionBar: React.FC = () => {
               zIndex: 9999,
               width: 230,
               maxHeight: 280,
-              background: 'rgba(18, 20, 29, 0.96)',
-              backdropFilter: 'blur(20px)',
-              WebkitBackdropFilter: 'blur(20px)',
-              borderRadius: 16,
-              border: '1px solid rgba(255, 255, 255, 0.12)',
-              boxShadow: '0 16px 36px rgba(0, 0, 0, 0.6), 0 0 20px rgba(154, 144, 255, 0.15)',
+              borderRadius: 'var(--radius-panel)',
               display: 'flex',
               flexDirection: 'column',
               padding: '8px',
               gap: 4,
             }}
           >
-            <div className="text-[11px] font-bold text-[var(--muted)] px-2 py-1 tracking-wider uppercase">
+            <div className="text-[11px] font-semibold text-[var(--muted)] px-2 py-1">
               {isRu ? 'Выберите кит' : 'Select Target Kit'}
             </div>
 
@@ -323,11 +330,11 @@ export const BatchActionBar: React.FC = () => {
                 <button
                   key={k.id}
                   onClick={() => handleKitSelect(k.id)}
-                  className="flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs text-left text-[var(--text)] hover:bg-white/10 transition-all cursor-pointer"
+                  className="flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs text-left text-[var(--text)] hover:bg-[var(--accent-soft)] cursor-pointer"
                   type="button"
                 >
                   <div className="flex items-center gap-2 truncate">
-                    <i className="ti ti-package text-sm text-[var(--accent)]" />
+                    <i className="ti ti-package text-sm text-[var(--soft)]" />
                     <span className="truncate font-medium">{k.name}</span>
                   </div>
                   <span className="text-[10px] text-[var(--muted)] shrink-0 ml-2">
@@ -337,11 +344,11 @@ export const BatchActionBar: React.FC = () => {
               ))}
             </div>
 
-            <div className="border-t border-white/10 pt-1.5 mt-1">
+            <div className="border-t border-[var(--line)] pt-1.5 mt-1">
               {!isCreatingKit ? (
                 <button
                   onClick={() => setIsCreatingKit(true)}
-                  className="w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs text-[var(--accent)] hover:bg-[var(--accent-soft)] transition-all cursor-pointer font-semibold"
+                  className="w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs text-[var(--text)] hover:bg-[var(--accent-soft)] cursor-pointer font-semibold"
                   type="button"
                 >
                   <i className="ti ti-plus text-sm" />
@@ -355,7 +362,7 @@ export const BatchActionBar: React.FC = () => {
                     value={newKitName}
                     onChange={(e) => setNewKitName(e.target.value)}
                     placeholder={isRu ? 'Название кита' : 'Kit Name'}
-                    className="w-full bg-white/5 border border-white/20 rounded-lg px-2 py-1 text-xs text-white outline-none focus:border-[var(--accent)]"
+                    className="glass-input w-full px-2 py-1 text-xs outline-none"
                   />
                   <div className="flex gap-1 justify-end">
                     <button
@@ -367,7 +374,7 @@ export const BatchActionBar: React.FC = () => {
                     </button>
                     <button
                       type="submit"
-                      className="px-2 py-0.5 text-[11px] rounded bg-[var(--accent)] text-[#0e1017] font-semibold"
+                      className="px-2 py-0.5 text-[11px] rounded bg-[var(--accent)] text-[var(--contrast-text)] font-semibold"
                     >
                       {isRu ? 'Создать' : 'Create'}
                     </button>

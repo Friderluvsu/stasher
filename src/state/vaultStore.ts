@@ -1,8 +1,8 @@
 import { create } from 'zustand';
 import { api, type PatternItem, type SoundItem, type ProjectItem } from '../services/api';
-import { audioEngine } from '../services/audioEngine';
+import { audioEngine, type PlaybackKind } from '../services/audioEngine';
 
-export type WorkspaceTab = 'midi' | 'sounds' | 'kit';
+export type WorkspaceTab = 'midi' | 'sounds' | 'kit' | 'visualizer';
 
 
 export interface Kit {
@@ -31,6 +31,10 @@ interface VaultState {
   // Projects
   projects: ProjectItem[];
 
+  // True while the first or a filter-changing fetch is in flight, so the empty state is not shown for a list that is still loading.
+  isLoadingPatterns: boolean;
+  isLoadingSounds: boolean;
+
   // Filters
   selectedTag: string;
   searchQuery: string;
@@ -38,7 +42,8 @@ interface VaultState {
   maxBpm: number | null;
   selectedProjectId: number | null;
 
-  // Audio Playback
+  // Audio Playback: the kind matters, a pattern and a sample can share an id.
+  currentlyPlayingKind: PlaybackKind | null;
   currentlyPlayingId: number | null;
   isPlaying: boolean;
 
@@ -86,9 +91,11 @@ interface VaultState {
     successful: number;
   };
 
-  // Actions
-  fetchPatterns: () => Promise<void>;
-  fetchSounds: () => Promise<void>;
+  // Actions. A plain fetch refreshes the rows already loaded; `reset` (a filter changed) starts from the first page.
+  fetchPatterns: (opts?: { reset?: boolean }) => Promise<void>;
+  fetchSounds: (opts?: { reset?: boolean }) => Promise<void>;
+  loadMorePatterns: () => Promise<void>;
+  loadMoreSounds: () => Promise<void>;
   fetchProjects: () => Promise<void>;
   deleteProject: (id: number) => Promise<void>;
   setSelectedTag: (tag: string) => void;
@@ -108,12 +115,31 @@ interface VaultState {
   uploadAndScan: (files: File[]) => Promise<void>;
   pollScanProgress: () => Promise<void>;
   seedDemoData: () => Promise<void>;
-  // Internal request sequence counters (race condition prevention)
-  _patternFetchSeq: number;
-  _soundFetchSeq: number;
 }
 
 const KITS_STORAGE_KEY = 'stasher_kits_v1';
+const SEARCH_DEBOUNCE_MS = 160;
+let searchTimer: ReturnType<typeof setTimeout> | null = null;
+
+export const LIST_PAGE_SIZE = 200;
+// A refresh after an edit reloads the rows already scrolled into view (up to this many) instead of snapping back to page one.
+const MAX_REFRESH_ROWS = 2000;
+
+// Request bookkeeping lives outside the store: bumping it must not notify subscribers.
+// Every request takes a new seq, so a newer fetch or page silently cancels an older one.
+const listRequests = {
+  patterns: { seq: 0, busy: false },
+  sounds: { seq: 0, busy: false },
+};
+
+function refreshLimit(loaded: number, reset?: boolean) {
+  return reset ? LIST_PAGE_SIZE : Math.min(MAX_REFRESH_ROWS, Math.max(LIST_PAGE_SIZE, loaded));
+}
+
+function appendNew<T extends { id: number }>(current: T[], page: T[]) {
+  const seen = new Set(current.map((x) => x.id));
+  return [...current, ...page.filter((x) => !seen.has(x.id))];
+}
 const ACTIVE_KIT_STORAGE_KEY = 'stasher_active_kit_id_v1';
 
 function loadKitsFromStorage(): { kits: Kit[]; activeKitId: string } {
@@ -150,8 +176,8 @@ function saveKitsToStorage(kits: Kit[], activeKitId?: string) {
 export const useVaultStore = create<VaultState>((set, get) => {
   const initialKitsData = loadKitsFromStorage();
 
-  audioEngine.setListener((isPlaying, patternId) => {
-    set({ isPlaying, currentlyPlayingId: patternId });
+  audioEngine.setListener((isPlaying, kind, id) => {
+    set({ isPlaying, currentlyPlayingKind: kind, currentlyPlayingId: id });
   });
 
   return {
@@ -172,12 +198,16 @@ export const useVaultStore = create<VaultState>((set, get) => {
 
     projects: [],
 
+    isLoadingPatterns: true,
+    isLoadingSounds: true,
+
     selectedTag: 'All',
     searchQuery: '',
     minBpm: null,
     maxBpm: null,
     selectedProjectId: null,
 
+    currentlyPlayingKind: null,
     currentlyPlayingId: null,
     isPlaying: false,
 
@@ -250,45 +280,43 @@ export const useVaultStore = create<VaultState>((set, get) => {
       if (!ids || ids.length === 0 || !tag) return;
       const numIds = ids.map(Number).filter((n) => Number.isInteger(n) && n > 0);
       if (numIds.length === 0) return;
+      const idSet = new Set(numIds);
+      const isSound = type === 'sound';
 
-      if (type === 'sound') {
-        const currentSounds = get().sounds;
-        const currentTagCounts = { ...get().soundTagCounts };
-        for (const id of numIds) {
-          const oldItem = currentSounds.find((s) => s.id === id);
-          if (oldItem && oldItem.tag !== tag) {
-            if (oldItem.tag && currentTagCounts[oldItem.tag]) currentTagCounts[oldItem.tag] = Math.max(0, currentTagCounts[oldItem.tag] - 1);
-            currentTagCounts[tag] = (currentTagCounts[tag] || 0) + 1;
-          }
-        }
-        const updatedSounds = currentSounds.map((s) => (numIds.includes(s.id) ? { ...s, tag } : s));
-        const updatedKits = get().kits.map((k) => ({
-          ...k,
-          sounds: k.sounds.map((s) => (numIds.includes(s.id) ? { ...s, tag } : s)),
-        }));
-        set({ sounds: updatedSounds, soundTagCounts: currentTagCounts, kits: updatedKits });
-        saveKitsToStorage(updatedKits, get().activeKitId);
-        try { await api.updateSoundsTagBatch(numIds, tag); } catch {}
-        await get().fetchSounds();
-      } else {
-        const currentPatterns = get().patterns;
-        const currentTagCounts = { ...get().patternTagCounts };
-        for (const id of numIds) {
-          const oldItem = currentPatterns.find((p) => p.id === id);
-          if (oldItem && oldItem.tag !== tag) {
-            if (oldItem.tag && currentTagCounts[oldItem.tag]) currentTagCounts[oldItem.tag] = Math.max(0, currentTagCounts[oldItem.tag] - 1);
-            currentTagCounts[tag] = (currentTagCounts[tag] || 0) + 1;
-          }
-        }
-        const updatedPatterns = currentPatterns.map((p) => (numIds.includes(p.id) ? { ...p, tag } : p));
-        const updatedKits = get().kits.map((k) => ({
-          ...k,
-          patterns: k.patterns.map((p) => (numIds.includes(p.id) ? { ...p, tag } : p)),
-        }));
-        set({ patterns: updatedPatterns, patternTagCounts: currentTagCounts, kits: updatedKits });
-        saveKitsToStorage(updatedKits, get().activeKitId);
-        try { await api.updatePatternsTagBatch(numIds, tag); } catch {}
-        await get().fetchPatterns();
+      // Optimistic update; the previous state is kept so a failed request can be rolled back instead of silently lost.
+      const before = isSound
+        ? { sounds: get().sounds, soundTagCounts: get().soundTagCounts, kits: get().kits }
+        : { patterns: get().patterns, patternTagCounts: get().patternTagCounts, kits: get().kits };
+
+      const items: Array<SoundItem | PatternItem> = isSound ? get().sounds : get().patterns;
+      const counts = { ...(isSound ? get().soundTagCounts : get().patternTagCounts) };
+      for (const item of items) {
+        if (!idSet.has(item.id) || item.tag === tag) continue;
+        if (item.tag && counts[item.tag]) counts[item.tag] = Math.max(0, counts[item.tag] - 1);
+        counts[tag] = (counts[tag] || 0) + 1;
+      }
+      const retag = <T extends { id: number; tag: string }>(list: T[]) =>
+        list.map((x) => (idSet.has(x.id) && x.tag !== tag ? { ...x, tag } : x));
+      const updatedKits = get().kits.map((k) =>
+        isSound ? { ...k, sounds: retag(k.sounds) } : { ...k, patterns: retag(k.patterns) }
+      );
+
+      if (isSound) set({ sounds: retag(get().sounds), soundTagCounts: counts, kits: updatedKits });
+      else set({ patterns: retag(get().patterns), patternTagCounts: counts, kits: updatedKits });
+
+      try {
+        if (isSound) await api.updateSoundsTagBatch(numIds, tag);
+        else await api.updatePatternsTagBatch(numIds, tag);
+      } catch (err) {
+        set(before);
+        throw err;
+      }
+      saveKitsToStorage(updatedKits, get().activeKitId);
+
+      // Only a filtered view needs the server's answer (retagged rows may leave or join it).
+      const { selectedTag, searchQuery } = get();
+      if (selectedTag !== 'All' || searchQuery.trim()) {
+        await (isSound ? get().fetchSounds() : get().fetchPatterns());
       }
     },
 
@@ -439,8 +467,9 @@ export const useVaultStore = create<VaultState>((set, get) => {
           if (oldItem.tag && currentTagCounts[oldItem.tag]) currentTagCounts[oldItem.tag] = Math.max(0, currentTagCounts[oldItem.tag] - 1);
           currentTagCounts[tag] = (currentTagCounts[tag] || 0) + 1;
         }
-        const updatedKits = get().kits.map(k => ({ ...k, sounds: k.sounds.map(s => s.id === id ? { ...s, sample_name: name, tag } : s) }));
-        set({ sounds: get().sounds.map(s => s.id === id ? { ...s, sample_name: name, tag } : s), soundTagCounts: currentTagCounts, kits: updatedKits });
+        // The engine stores a rename as the display title (channel_name) and the file name; refetch brings the exact file name.
+        const updatedKits = get().kits.map(k => ({ ...k, sounds: k.sounds.map(s => s.id === id ? { ...s, channel_name: name, tag } : s) }));
+        set({ sounds: get().sounds.map(s => s.id === id ? { ...s, channel_name: name, tag } : s), soundTagCounts: currentTagCounts, kits: updatedKits });
         saveKitsToStorage(updatedKits, get().activeKitId);
         get().fetchSounds();
       } else {
@@ -470,15 +499,11 @@ export const useVaultStore = create<VaultState>((set, get) => {
       successful: 0
     },
 
-    // Sequence counters to cancel stale in-flight requests
-    _patternFetchSeq: 0,
-    _soundFetchSeq: 0,
-
-    fetchPatterns: async () => {
-      const seq = get()._patternFetchSeq + 1;
-      set({ _patternFetchSeq: seq });
-
-      const { selectedTag, searchQuery, minBpm, maxBpm, selectedProjectId } = get();
+    fetchPatterns: async (opts) => {
+      const req = listRequests.patterns;
+      const seq = ++req.seq;
+      req.busy = true;
+      const { selectedTag, searchQuery, minBpm, maxBpm, selectedProjectId, patterns } = get();
       try {
         const res = await api.fetchPatterns({
           tag: selectedTag,
@@ -486,43 +511,115 @@ export const useVaultStore = create<VaultState>((set, get) => {
           min_bpm: minBpm || undefined,
           max_bpm: maxBpm || undefined,
           project_id: selectedProjectId || undefined,
-          limit: 200
+          limit: refreshLimit(patterns.length, opts?.reset)
         });
-        // Only apply if this is still the latest request
-        if (get()._patternFetchSeq === seq) {
+        if (req.seq === seq) {
+          // Free before the list changes, so a load-more triggered by the re-render is not skipped as "busy".
+          req.busy = false;
           set({
             patterns: res.items,
+            totalPatterns: res.total,
+            patternTagCounts: res.tag_counts,
+            isLoadingPatterns: false
+          });
+        }
+      } catch (err) {
+        if (req.seq === seq) set({ isLoadingPatterns: false });
+        console.error('Failed to load patterns:', err);
+      } finally {
+        if (req.seq === seq) req.busy = false;
+      }
+    },
+
+    loadMorePatterns: async () => {
+      const req = listRequests.patterns;
+      const { patterns, totalPatterns, selectedTag, searchQuery, minBpm, maxBpm, selectedProjectId } = get();
+      if (req.busy || patterns.length >= totalPatterns) return;
+      const seq = ++req.seq;
+      req.busy = true;
+      try {
+        const res = await api.fetchPatterns({
+          tag: selectedTag,
+          search: searchQuery,
+          min_bpm: minBpm || undefined,
+          max_bpm: maxBpm || undefined,
+          project_id: selectedProjectId || undefined,
+          limit: LIST_PAGE_SIZE,
+          offset: patterns.length
+        });
+        if (req.seq === seq) {
+          // Free before the list changes, so a load-more triggered by the re-render is not skipped as "busy".
+          req.busy = false;
+          set({
+            patterns: appendNew(get().patterns, res.items),
             totalPatterns: res.total,
             patternTagCounts: res.tag_counts
           });
         }
       } catch (err) {
-        console.error('Failed to load patterns:', err);
+        console.error('Failed to load more patterns:', err);
+      } finally {
+        if (req.seq === seq) req.busy = false;
       }
     },
 
-    fetchSounds: async () => {
-      const seq = get()._soundFetchSeq + 1;
-      set({ _soundFetchSeq: seq });
-
-      const { selectedTag, searchQuery, selectedProjectId } = get();
+    fetchSounds: async (opts) => {
+      const req = listRequests.sounds;
+      const seq = ++req.seq;
+      req.busy = true;
+      const { selectedTag, searchQuery, selectedProjectId, sounds } = get();
       try {
         const res = await api.fetchSounds({
           tag: selectedTag,
           search: searchQuery,
           project_id: selectedProjectId || undefined,
-          limit: 200
+          limit: refreshLimit(sounds.length, opts?.reset)
         });
-        // Only apply if this is still the latest request
-        if (get()._soundFetchSeq === seq) {
+        if (req.seq === seq) {
+          // Free before the list changes, so a load-more triggered by the re-render is not skipped as "busy".
+          req.busy = false;
           set({
             sounds: res.items,
+            totalSounds: res.total,
+            soundTagCounts: res.tag_counts,
+            isLoadingSounds: false
+          });
+        }
+      } catch (err) {
+        if (req.seq === seq) set({ isLoadingSounds: false });
+        console.error('Failed to load sounds:', err);
+      } finally {
+        if (req.seq === seq) req.busy = false;
+      }
+    },
+
+    loadMoreSounds: async () => {
+      const req = listRequests.sounds;
+      const { sounds, totalSounds, selectedTag, searchQuery, selectedProjectId } = get();
+      if (req.busy || sounds.length >= totalSounds) return;
+      const seq = ++req.seq;
+      req.busy = true;
+      try {
+        const res = await api.fetchSounds({
+          tag: selectedTag,
+          search: searchQuery,
+          project_id: selectedProjectId || undefined,
+          limit: LIST_PAGE_SIZE,
+          offset: sounds.length
+        });
+        if (req.seq === seq) {
+          // Free before the list changes, so a load-more triggered by the re-render is not skipped as "busy".
+          req.busy = false;
+          set({
+            sounds: appendNew(get().sounds, res.items),
             totalSounds: res.total,
             soundTagCounts: res.tag_counts
           });
         }
       } catch (err) {
-        console.error('Failed to load sounds:', err);
+        console.error('Failed to load more sounds:', err);
+      } finally {
+        if (req.seq === seq) req.busy = false;
       }
     },
 
@@ -554,34 +651,38 @@ export const useVaultStore = create<VaultState>((set, get) => {
     setSelectedTag: (tag) => {
       const { activeTab } = get();
       if (activeTab === 'sounds') {
-        set({ selectedTag: tag, sounds: [], totalSounds: 0 });
-        get().fetchSounds();
+        set({ selectedTag: tag, isLoadingSounds: true });
+        get().fetchSounds({ reset: true });
       } else {
-        set({ selectedTag: tag, patterns: [], totalPatterns: 0 });
-        get().fetchPatterns();
+        set({ selectedTag: tag, isLoadingPatterns: true });
+        get().fetchPatterns({ reset: true });
       }
     },
 
     setSearchQuery: (query) => {
       set({ searchQuery: query });
-      const { activeTab } = get();
-      if (activeTab === 'sounds') get().fetchSounds();
-      else get().fetchPatterns();
+      // One request per pause in typing instead of one per keystroke.
+      if (searchTimer) clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => {
+        searchTimer = null;
+        if (get().activeTab === 'sounds') get().fetchSounds({ reset: true });
+        else get().fetchPatterns({ reset: true });
+      }, SEARCH_DEBOUNCE_MS);
     },
 
     setBpmFilter: (min, max) => {
       set({ minBpm: min, maxBpm: max });
-      get().fetchPatterns();
+      get().fetchPatterns({ reset: true });
     },
 
     setSelectedProjectId: (id) => {
       const { activeTab } = get();
       if (activeTab === 'sounds') {
-        set({ selectedProjectId: id, sounds: [], totalSounds: 0 });
-        get().fetchSounds();
+        set({ selectedProjectId: id, isLoadingSounds: true });
+        get().fetchSounds({ reset: true });
       } else {
-        set({ selectedProjectId: id, patterns: [], totalPatterns: 0 });
-        get().fetchPatterns();
+        set({ selectedProjectId: id, isLoadingPatterns: true });
+        get().fetchPatterns({ reset: true });
       }
     },
 

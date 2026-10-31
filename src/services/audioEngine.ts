@@ -1,13 +1,18 @@
 import type { NoteEvent } from './api';
 
+export type PlaybackKind = 'pattern' | 'sound';
+type PlaybackListener = (isPlaying: boolean, kind: PlaybackKind | null, id: number | null) => void;
+
 class AudioEngine {
   private ctx: AudioContext | null = null;
   private isPlaying = false;
   private loopInterval: number | null = null;
-  private currentPatternId: number | null = null;
-  private scheduledNodes: { stop: () => void }[] = [];
+  private currentKind: PlaybackKind | null = null;
+  private currentId: number | null = null;
+  // Finished nodes remove themselves, so a pattern left looping does not pile up every note it ever played.
+  private scheduledNodes = new Set<{ stop: () => void }>();
   private currentAudioElement: HTMLAudioElement | null = null;
-  private onPlaybackStateChange?: (isPlaying: boolean, patternId: number | null) => void;
+  private onPlaybackStateChange?: PlaybackListener;
 
   private sampleBuffers: Map<string, AudioBuffer> = new Map();
   private isSamplesLoaded = false;
@@ -99,26 +104,31 @@ class AudioEngine {
   }
 
   private patternPlaybackInfo: {
-    patternId: number;
-    notes: NoteEvent[];
-    tempo: number;
-    ppq: number;
-    tag: string;
-    loop: boolean;
     startTime: number;
     patternDuration: number;
     startOffsetSeconds: number;
   } | null = null;
   private seekTimeoutId: number | null = null;
   private soundPlaybackInfo: {
-    soundId: number;
     startTime: number;
     duration: number;
     startOffsetSeconds: number;
   } | null = null;
 
-  public setListener(cb: (isPlaying: boolean, patternId: number | null) => void) {
+  public setListener(cb: PlaybackListener) {
     this.onPlaybackStateChange = cb;
+  }
+
+  // Patterns and samples have separate id spaces: a pattern and a sample with the same id are different items.
+  private isCurrent(kind: PlaybackKind, id: number) {
+    return this.isPlaying && this.currentKind === kind && this.currentId === id;
+  }
+
+  private start(kind: PlaybackKind, id: number) {
+    this.isPlaying = true;
+    this.currentKind = kind;
+    this.currentId = id;
+    this.onPlaybackStateChange?.(true, kind, id);
   }
 
   public stop() {
@@ -131,7 +141,14 @@ class AudioEngine {
       this.loopInterval = null;
     }
     if (this.currentAudioElement) {
-      this.currentAudioElement.pause();
+      const audio = this.currentAudioElement;
+      audio.onloadedmetadata = null;
+      audio.onended = null;
+      audio.onerror = null;
+      audio.pause();
+      // Drops the connection to the engine instead of letting the abandoned element keep buffering.
+      audio.removeAttribute('src');
+      audio.load();
       this.currentAudioElement = null;
     }
     this.scheduledNodes.forEach((node) => {
@@ -139,16 +156,17 @@ class AudioEngine {
         node.stop();
       } catch {}
     });
-    this.scheduledNodes = [];
+    this.scheduledNodes.clear();
     this.isPlaying = false;
-    this.currentPatternId = null;
+    this.currentKind = null;
+    this.currentId = null;
     this.patternPlaybackInfo = null;
     this.soundPlaybackInfo = null;
-    this.onPlaybackStateChange?.(false, null);
+    this.onPlaybackStateChange?.(false, null, null);
   }
 
-  public getPlaybackProgress(id: number): number {
-    if (!this.isPlaying || this.currentPatternId !== id) return 0;
+  public getPlaybackProgress(kind: PlaybackKind, id: number): number {
+    if (!this.isCurrent(kind, id)) return 0;
 
     if (this.currentAudioElement && this.currentAudioElement.duration > 0) {
       return Math.max(0, Math.min(1, this.currentAudioElement.currentTime / this.currentAudioElement.duration));
@@ -172,30 +190,28 @@ class AudioEngine {
   public playSoundSample(soundId: number, tag: string, startProgress: number = 0) {
     this.initContext();
     this.stop();
-
-    this.isPlaying = true;
-    this.currentPatternId = soundId;
-    this.onPlaybackStateChange?.(true, soundId);
+    this.start('sound', soundId);
 
     const audioUrl = `http://127.0.0.1:8765/api/sounds/${soundId}/audio`;
     const audio = new Audio(audioUrl);
     this.currentAudioElement = audio;
 
     const playFallback = () => {
-      if (!this.ctx) return;
+      // A stale element (the user already switched to another item) must not beep over the new one.
+      if (!this.ctx || this.currentAudioElement !== audio) return;
+      this.currentAudioElement = null;
       const startTime = this.ctx.currentTime;
       const dur = 0.8;
       const clampedProgress = Math.max(0, Math.min(0.95, startProgress));
       const startOffset = clampedProgress * dur;
       this.soundPlaybackInfo = {
-        soundId,
         startTime,
         duration: dur,
         startOffsetSeconds: startOffset,
       };
       this.synthesizeNote(60, startTime, Math.max(0.1, dur - startOffset), 1.0, tag);
-      setTimeout(() => {
-        if (this.currentPatternId === soundId) {
+      this.seekTimeoutId = window.setTimeout(() => {
+        if (this.isCurrent('sound', soundId)) {
           this.stop();
         }
       }, (dur - startOffset + 0.1) * 1000);
@@ -208,7 +224,7 @@ class AudioEngine {
     };
 
     audio.onended = () => {
-      if (this.currentPatternId === soundId) {
+      if (this.currentAudioElement === audio) {
         this.stop();
       }
     };
@@ -217,13 +233,15 @@ class AudioEngine {
       playFallback();
     };
 
-    audio.play().catch(() => {
+    audio.play().catch((err: unknown) => {
+      // stop() pausing a still-loading element rejects play() with AbortError; that is not a failed file.
+      if (err instanceof DOMException && err.name === 'AbortError') return;
       playFallback();
     });
   }
 
   public seekSound(soundId: number, tag: string, progress: number) {
-    if (this.isPlaying && this.currentPatternId === soundId && this.currentAudioElement && this.currentAudioElement.duration > 0) {
+    if (this.isCurrent('sound', soundId) && this.currentAudioElement && this.currentAudioElement.duration > 0) {
       this.currentAudioElement.currentTime = Math.max(0, Math.min(this.currentAudioElement.duration - 0.05, progress * this.currentAudioElement.duration));
       this.currentAudioElement.play().catch(() => {});
       return;
@@ -243,70 +261,60 @@ class AudioEngine {
     this.initContext();
     if (!this.ctx || !notes || notes.length === 0) return;
 
-    if (this.isPlaying && this.currentPatternId === patternId && startProgress === 0) {
+    if (this.isCurrent('pattern', patternId) && startProgress === 0) {
       this.stop();
       return;
     }
 
     this.stop();
-    this.isPlaying = true;
-    this.currentPatternId = patternId;
-    this.onPlaybackStateChange?.(true, patternId);
+    this.start('pattern', patternId);
 
     if (!this.isSamplesLoaded || this.sampleBuffers.size === 0) {
       await this.preloadSamples();
     }
 
-    if (!this.isPlaying || this.currentPatternId !== patternId || !this.ctx) return;
+    if (!this.isCurrent('pattern', patternId) || !this.ctx) return;
+    const ctx = this.ctx;
 
     const secondsPerTick = (60 / tempo) / ppq;
-    const maxTick = Math.max(...notes.map((n) => n.pos + n.duration));
+    let maxTick = 0;
+    for (const n of notes) maxTick = Math.max(maxTick, n.pos + n.duration);
     const patternDuration = Math.max(0.5, maxTick * secondsPerTick);
     const clampedProgress = Math.max(0, Math.min(0.98, startProgress));
     const startOffsetSeconds = clampedProgress * patternDuration;
 
-    const scheduleFromOffset = (offsetSeconds: number) => {
-      if (!this.ctx || !this.isPlaying || this.currentPatternId !== patternId) return;
-      const startTime = this.ctx.currentTime + 0.03;
-
-      notes.forEach((n) => {
-        const noteTimeFromPatternStart = n.pos * secondsPerTick;
-        if (noteTimeFromPatternStart >= offsetSeconds - 0.001) {
-          const noteStart = startTime + (noteTimeFromPatternStart - offsetSeconds);
-          const noteDuration = Math.max(0.04, n.duration * secondsPerTick);
-          const velocity = (n.velocity || 100) / 127;
-          this.synthesizeNote(n.pitch, noteStart, noteDuration, velocity, tag);
-        }
-      });
-
-      this.patternPlaybackInfo = {
-        patternId,
-        notes,
-        tempo,
-        ppq,
-        tag,
-        loop,
-        startTime,
-        patternDuration,
-        startOffsetSeconds: offsetSeconds,
-      };
+    // Every cycle is placed on the audio clock (cycleZero + k * duration), so repeats stay gapless instead of
+    // drifting with timer jitter; only about one cycle is scheduled ahead, which keeps the node count small.
+    const cycleZero = ctx.currentTime + 0.03 - startOffsetSeconds;
+    this.patternPlaybackInfo = {
+      startTime: cycleZero + startOffsetSeconds,
+      patternDuration,
+      startOffsetSeconds,
     };
 
-    scheduleFromOffset(startOffsetSeconds);
+    const scheduleCycle = (cycle: number, fromSeconds: number) => {
+      const cycleStart = cycleZero + cycle * patternDuration;
+      for (const n of notes) {
+        const noteTime = n.pos * secondsPerTick;
+        if (noteTime < fromSeconds - 0.001) continue;
+        const noteDuration = Math.max(0.04, n.duration * secondsPerTick);
+        const velocity = (n.velocity || 100) / 127;
+        this.synthesizeNote(n.pitch, cycleStart + noteTime, noteDuration, velocity, tag);
+      }
+    };
 
-    if (loop) {
-      const remainingFirstCycleSeconds = (1 - clampedProgress) * patternDuration;
-      this.seekTimeoutId = window.setTimeout(() => {
-        if (this.isPlaying && this.currentPatternId === patternId) {
-          scheduleFromOffset(0);
-          this.loopInterval = window.setInterval(() => {
-            if (this.isPlaying && this.currentPatternId === patternId) {
-              scheduleFromOffset(0);
-            }
-          }, patternDuration * 1000);
-        }
-      }, remainingFirstCycleSeconds * 1000);
-    }
+    scheduleCycle(0, startOffsetSeconds);
+    if (!loop) return;
+
+    let nextCycle = 1;
+    const LOOKAHEAD_SECONDS = 0.3;
+    this.loopInterval = window.setInterval(() => {
+      if (!this.isCurrent('pattern', patternId)) return;
+      while (cycleZero + nextCycle * patternDuration - ctx.currentTime < LOOKAHEAD_SECONDS) {
+        scheduleCycle(nextCycle, 0);
+        nextCycle += 1;
+      }
+    }, 100);
   }
 
   public seekPattern(
@@ -319,58 +327,6 @@ class AudioEngine {
     loop: boolean = true
   ) {
     this.playPattern(patternId, notes, tempo, ppq, tag, loop, progress);
-  }
-
-  public async playStack(
-    stackItems: { id: number; notes: NoteEvent[]; tag: string }[],
-    tempo: number = 140,
-    ppq: number = 96
-  ) {
-    this.initContext();
-    if (!this.ctx || stackItems.length === 0) return;
-
-    this.stop();
-    this.isPlaying = true;
-    this.currentPatternId = -999;
-    this.onPlaybackStateChange?.(true, -999);
-
-    if (!this.isSamplesLoaded || this.sampleBuffers.size === 0) {
-      await this.preloadSamples();
-    }
-
-    if (!this.isPlaying) return;
-
-    const secondsPerTick = (60 / tempo) / ppq;
-    let maxTick = 0;
-    stackItems.forEach((item) => {
-      item.notes.forEach((n) => {
-        if (n.pos + n.duration > maxTick) maxTick = n.pos + n.duration;
-      });
-    });
-
-    const stackDuration = Math.max(2, maxTick * secondsPerTick);
-
-    const scheduleStack = () => {
-      if (!this.ctx || !this.isPlaying) return;
-      const startTime = this.ctx.currentTime + 0.05;
-
-      stackItems.forEach((item) => {
-        item.notes.forEach((n) => {
-          const noteStart = startTime + n.pos * secondsPerTick;
-          const noteDuration = Math.max(0.04, n.duration * secondsPerTick);
-          const velocity = (n.velocity || 100) / 127;
-          this.synthesizeNote(n.pitch, noteStart, noteDuration, velocity, item.tag);
-        });
-      });
-    };
-
-    scheduleStack();
-
-    this.loopInterval = window.setInterval(() => {
-      if (this.isPlaying) {
-        scheduleStack();
-      }
-    }, stackDuration * 1000);
   }
 
   private midiToFreq(midi: number): number {
@@ -409,13 +365,18 @@ class AudioEngine {
       source.stop(time + duration + releaseTail + 0.1);
     }
 
-    this.scheduledNodes.push({
+    const handle = {
       stop: () => {
         try {
           source.stop();
         } catch {}
       },
-    });
+    };
+    this.scheduledNodes.add(handle);
+    source.onended = () => {
+      this.scheduledNodes.delete(handle);
+      gain.disconnect();
+    };
   }
 
   private synthesizeNote(pitch: number, time: number, duration: number, velocity: number, tag: string) {
@@ -548,14 +509,19 @@ class AudioEngine {
     osc2.start(time);
     osc2.stop(time + duration + 0.6);
 
-    this.scheduledNodes.push({
+    const handle = {
       stop: () => {
         try {
           osc.stop();
           osc2.stop();
         } catch {}
       },
-    });
+    };
+    this.scheduledNodes.add(handle);
+    osc.onended = () => {
+      this.scheduledNodes.delete(handle);
+      gain.disconnect();
+    };
   }
 }
 
