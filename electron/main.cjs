@@ -165,7 +165,7 @@ function createWindow() {
     minHeight: 600,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     transparent: process.platform === 'darwin',
-    backgroundColor: process.platform === 'darwin' ? '#00000000' : '#0e1017',
+    backgroundColor: process.platform === 'darwin' ? '#00000000' : '#141415',
     trafficLightPosition: { x: 16, y: 16 },
     show: false,
     icon: path.join(__dirname, '..', 'icons', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),

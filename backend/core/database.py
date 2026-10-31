@@ -1,6 +1,7 @@
 import os
 import io
 import json
+import re
 import sqlite3
 import time
 import zipfile
@@ -17,11 +18,25 @@ CANONICAL_TAGS = {
     'lead': 'Lead', 'pluck': 'Pluck', 'vox': 'Vox', 'fx': 'FX', 'other': 'Other'
 }
 
+AUDIO_EXTENSIONS = {'.wav', '.mp3', '.aif', '.aiff', '.flac', '.ogg'}
+
 def normalize_tag(tag: Optional[str]) -> str:
     if not tag:
         return 'Other'
     t = tag.strip().lower()
     return CANONICAL_TAGS.get(t, tag.strip())
+
+def fts_match_query(search: Optional[str]) -> Optional[str]:
+    """Turns free text into a safe FTS5 query: every word is a quoted prefix phrase, all must match.
+
+    Raw input used to go straight into MATCH, so "hi-hat", "C#m" or a stray quote raised an FTS syntax
+    error and the whole list request failed. Words without any letter or digit are dropped."""
+    if not search:
+        return None
+    words = [w for w in search.split() if re.search(r"\w", w)]
+    if not words:
+        return None
+    return " ".join('"' + w.replace('"', '""') + '"*' for w in words)
 
 def get_connection() -> sqlite3.Connection:
     try:
@@ -359,9 +374,10 @@ def query_patterns(
     params: List[Any] = []
     where_clauses: List[str] = []
 
-    if search and search.strip():
+    match = fts_match_query(search)
+    if match:
         where_clauses.append("p.id IN (SELECT pattern_id FROM fts_patterns WHERE fts_patterns MATCH ?)")
-        params.append(f"{search.strip()}*")
+        params.append(match)
 
     if tag and tag != "All":
         where_clauses.append("p.tag = ? COLLATE NOCASE")
@@ -442,9 +458,10 @@ def query_sounds(
     params: List[Any] = []
     where_clauses: List[str] = []
 
-    if search and search.strip():
+    match = fts_match_query(search)
+    if match:
         where_clauses.append("s.id IN (SELECT sound_id FROM fts_sounds WHERE fts_sounds MATCH ?)")
-        params.append(f"{search.strip()}*")
+        params.append(match)
 
     if tag and tag != "All":
         where_clauses.append("s.tag = ? COLLATE NOCASE")
@@ -738,13 +755,27 @@ def update_sound(sound_id: int, name: str, tag: str):
     conn = get_connection()
     cursor = conn.cursor()
     norm_tag = normalize_tag(tag)
-    if name and name.strip():
-        cursor.execute("UPDATE sounds SET sample_name = ?, tag = ? WHERE id = ?", (name.strip(), norm_tag, sound_id))
+    clean_name = (name or "").strip()
+    if clean_name:
+        # The card title is channel_name and kit export/drag use sample_name as the file name,
+        # so a rename sets both and keeps the original audio extension on the file name.
+        row = cursor.execute("SELECT sample_name FROM sounds WHERE id = ?", (sound_id,)).fetchone()
+        old_ext = os.path.splitext((row["sample_name"] if row else "") or "")[1].lower()
+        has_audio_ext = os.path.splitext(clean_name)[1].lower() in AUDIO_EXTENSIONS
+        file_name = clean_name if has_audio_ext or old_ext not in AUDIO_EXTENSIONS else clean_name + old_ext
+        display_name = os.path.splitext(clean_name)[0] if has_audio_ext else clean_name
+        cursor.execute(
+            "UPDATE sounds SET channel_name = ?, sample_name = ?, tag = ? WHERE id = ?",
+            (display_name, file_name, norm_tag, sound_id),
+        )
     else:
         cursor.execute("UPDATE sounds SET tag = ? WHERE id = ?", (norm_tag, sound_id))
     try:
-        if name and name.strip():
-            cursor.execute("UPDATE fts_sounds SET sample_name = ?, tag = ? WHERE sound_id = ?", (name.strip(), norm_tag, sound_id))
+        if clean_name:
+            cursor.execute(
+                "UPDATE fts_sounds SET channel_name = ?, sample_name = ?, tag = ? WHERE sound_id = ?",
+                (display_name, file_name, norm_tag, sound_id),
+            )
         else:
             cursor.execute("UPDATE fts_sounds SET tag = ? WHERE sound_id = ?", (norm_tag, sound_id))
     except Exception:

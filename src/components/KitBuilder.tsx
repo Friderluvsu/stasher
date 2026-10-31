@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import ReactDOM from 'react-dom';
+import { useShallow } from 'zustand/react/shallow';
 import { useVaultStore } from '../state/vaultStore';
 import { useInterfaceStore } from '../state/interfaceStore';
 import { notify } from '../state/toastStore';
@@ -13,9 +14,17 @@ export const KitBuilder: React.FC = () => {
   const {
     kits, activeKitId, setActiveKit, createKit, deleteKit, setKitName,
     removeKitSound, removeKitPattern, clearKit, exportKit,
-    playSound, playPattern, stopPlayback, isPlaying, currentlyPlayingId,
+    playSound, playPattern, stopPlayback, playingKey,
     setActiveTab
-  } = useVaultStore();
+  } = useVaultStore(useShallow((s) => ({
+    kits: s.kits, activeKitId: s.activeKitId, setActiveKit: s.setActiveKit, createKit: s.createKit,
+    deleteKit: s.deleteKit, setKitName: s.setKitName,
+    removeKitSound: s.removeKitSound, removeKitPattern: s.removeKitPattern, clearKit: s.clearKit, exportKit: s.exportKit,
+    playSound: s.playSound, playPattern: s.playPattern, stopPlayback: s.stopPlayback,
+    // One string instead of three fields: patterns and samples are listed side by side here and can share an id.
+    playingKey: s.isPlaying && s.currentlyPlayingKind ? `${s.currentlyPlayingKind}:${s.currentlyPlayingId}` : null,
+    setActiveTab: s.setActiveTab,
+  })));
 
   const [isKitSelectorOpen, setIsKitSelectorOpen] = useState(false);
   const [isCreatingKit, setIsCreatingKit] = useState(false);
@@ -80,46 +89,46 @@ export const KitBuilder: React.FC = () => {
   // 1. MIDI Melodies & Instruments
   const melodicPatterns = kitPatterns.filter(p => !DRUM_TAGS.includes(normalizeTag(p.tag)));
   const melodyCategories = [
-    { title: isRu ? 'Мелодии (Melodies)' : 'Melodies & Toplines', items: melodicPatterns.filter(p => normalizeTag(p.tag) === 'Melody'), icon: 'ti-music', color: '#9a90ff' },
-    { title: isRu ? 'Аккорды (Chords)' : 'Chord Progressions', items: melodicPatterns.filter(p => normalizeTag(p.tag) === 'Chords'), icon: 'ti-piano', color: '#71c89f' },
-    { title: isRu ? 'Лиды (Leads)' : 'Leads & Synths', items: melodicPatterns.filter(p => normalizeTag(p.tag) === 'Lead'), icon: 'ti-wand', color: '#a55eea' },
-    { title: isRu ? 'Плаки (Plucks)' : 'Plucks & Arps', items: melodicPatterns.filter(p => normalizeTag(p.tag) === 'Pluck'), icon: 'ti-guitar-pick', color: '#38ada9' },
-    { title: isRu ? 'Бас MIDI (Basslines)' : 'Basslines', items: melodicPatterns.filter(p => normalizeTag(p.tag) === 'Bass'), icon: 'ti-wave-sine', color: '#ff6b81' },
-    { title: isRu ? 'Прочие MIDI' : 'Other Melodic MIDIs', items: melodicPatterns.filter(p => !['Melody', 'Chords', 'Lead', 'Pluck', 'Bass'].includes(normalizeTag(p.tag))), icon: 'ti-dots', color: '#8a92a1' },
+    { title: isRu ? 'Мелодии (Melodies)' : 'Melodies & Toplines', items: melodicPatterns.filter(p => normalizeTag(p.tag) === 'Melody'), icon: 'ti-music', color: 'var(--muted)' },
+    { title: isRu ? 'Аккорды (Chords)' : 'Chord Progressions', items: melodicPatterns.filter(p => normalizeTag(p.tag) === 'Chords'), icon: 'ti-piano', color: 'var(--muted)' },
+    { title: isRu ? 'Лиды (Leads)' : 'Leads & Synths', items: melodicPatterns.filter(p => normalizeTag(p.tag) === 'Lead'), icon: 'ti-wand', color: 'var(--muted)' },
+    { title: isRu ? 'Плаки (Plucks)' : 'Plucks & Arps', items: melodicPatterns.filter(p => normalizeTag(p.tag) === 'Pluck'), icon: 'ti-guitar-pick', color: 'var(--muted)' },
+    { title: isRu ? 'Бас MIDI (Basslines)' : 'Basslines', items: melodicPatterns.filter(p => normalizeTag(p.tag) === 'Bass'), icon: 'ti-wave-sine', color: 'var(--muted)' },
+    { title: isRu ? 'Прочие MIDI' : 'Other Melodic MIDIs', items: melodicPatterns.filter(p => !['Melody', 'Chords', 'Lead', 'Pluck', 'Bass'].includes(normalizeTag(p.tag))), icon: 'ti-dots', color: 'var(--muted)' },
   ].filter(c => c.items.length > 0);
 
   // 2. MIDI Drums & Grooves
   const drumPatterns = kitPatterns.filter(p => DRUM_TAGS.includes(normalizeTag(p.tag)));
   const drumMidiCategories = [
-    { title: isRu ? '808 MIDI' : '808 Patterns', items: drumPatterns.filter(p => normalizeTag(p.tag) === '808'), icon: 'ti-flame', color: '#ff6b81' },
-    { title: isRu ? 'Хэты & Роллы (Hi-Hats)' : 'Hi-Hat Rolls & Loops', items: drumPatterns.filter(p => ['Hi-Hat', 'Open Hat'].includes(normalizeTag(p.tag))), icon: 'ti-sparkles', color: '#48dbfb' },
-    { title: isRu ? 'Кики (Kicks)' : 'Kick Patterns', items: drumPatterns.filter(p => normalizeTag(p.tag) === 'Kick'), icon: 'ti-circle-dot', color: '#ff9f43' },
-    { title: isRu ? 'Снейры (Snares)' : 'Snare Patterns', items: drumPatterns.filter(p => normalizeTag(p.tag) === 'Snare'), icon: 'ti-circle-dashed', color: '#feca57' },
-    { title: isRu ? 'Клэпы (Claps)' : 'Clap Patterns', items: drumPatterns.filter(p => normalizeTag(p.tag) === 'Clap'), icon: 'ti-hand-stop', color: '#fed330' },
-    { title: isRu ? 'Римы (Rims)' : 'Rim Patterns', items: drumPatterns.filter(p => normalizeTag(p.tag) === 'Rim'), icon: 'ti-crosshair', color: '#fa8231' },
-    { title: isRu ? 'Перкуссия & Томы' : 'Percussion & Toms', items: drumPatterns.filter(p => ['Perc', 'Tom', 'Crash'].includes(normalizeTag(p.tag))), icon: 'ti-grain', color: '#54a0ff' },
+    { title: isRu ? '808 MIDI' : '808 Patterns', items: drumPatterns.filter(p => normalizeTag(p.tag) === '808'), icon: 'ti-flame', color: 'var(--muted)' },
+    { title: isRu ? 'Хэты & Роллы (Hi-Hats)' : 'Hi-Hat Rolls & Loops', items: drumPatterns.filter(p => ['Hi-Hat', 'Open Hat'].includes(normalizeTag(p.tag))), icon: 'ti-sparkles', color: 'var(--muted)' },
+    { title: isRu ? 'Кики (Kicks)' : 'Kick Patterns', items: drumPatterns.filter(p => normalizeTag(p.tag) === 'Kick'), icon: 'ti-circle-dot', color: 'var(--muted)' },
+    { title: isRu ? 'Снейры (Snares)' : 'Snare Patterns', items: drumPatterns.filter(p => normalizeTag(p.tag) === 'Snare'), icon: 'ti-circle-dashed', color: 'var(--muted)' },
+    { title: isRu ? 'Клэпы (Claps)' : 'Clap Patterns', items: drumPatterns.filter(p => normalizeTag(p.tag) === 'Clap'), icon: 'ti-hand-stop', color: 'var(--muted)' },
+    { title: isRu ? 'Римы (Rims)' : 'Rim Patterns', items: drumPatterns.filter(p => normalizeTag(p.tag) === 'Rim'), icon: 'ti-crosshair', color: 'var(--muted)' },
+    { title: isRu ? 'Перкуссия & Томы' : 'Percussion & Toms', items: drumPatterns.filter(p => ['Perc', 'Tom', 'Crash'].includes(normalizeTag(p.tag))), icon: 'ti-grain', color: 'var(--muted)' },
   ].filter(c => c.items.length > 0);
 
   // 3. Audio Sounds (One-shots & Samples)
   const soundCategories = [
-    { title: isRu ? '808s' : '808s', items: kitSounds.filter(s => normalizeTag(s.tag) === '808'), icon: 'ti-flame', color: '#ff6b81' },
-    { title: isRu ? 'Бас (Basses)' : 'Basses', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Bass'), icon: 'ti-wave-sine', color: '#eb2f06' },
-    { title: isRu ? 'Кики (Kicks)' : 'Kicks', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Kick'), icon: 'ti-circle-dot', color: '#ff9f43' },
-    { title: isRu ? 'Снейры (Snares)' : 'Snares', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Snare'), icon: 'ti-circle-dashed', color: '#feca57' },
-    { title: isRu ? 'Клэпы (Claps)' : 'Claps', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Clap'), icon: 'ti-hand-stop', color: '#fed330' },
-    { title: isRu ? 'Римы (Rims)' : 'Rims', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Rim'), icon: 'ti-crosshair', color: '#fa8231' },
-    { title: isRu ? 'Хэты (Hi-Hats Closed)' : 'Hi-Hats (Closed)', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Hi-Hat'), icon: 'ti-sparkles', color: '#48dbfb' },
-    { title: isRu ? 'Открытые хэты (Open Hats)' : 'Open Hats', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Open Hat'), icon: 'ti-ripple', color: '#00d2d3' },
-    { title: isRu ? 'Крэши & Тарелки (Crashes)' : 'Crashes & Cymbals', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Crash'), icon: 'ti-sun', color: '#2bcbba' },
-    { title: isRu ? 'Перкуссия (Percs)' : 'Percs', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Perc'), icon: 'ti-grain', color: '#54a0ff' },
-    { title: isRu ? 'Томы (Toms)' : 'Toms', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Tom'), icon: 'ti-circles', color: '#45aaf2' },
-    { title: isRu ? 'Вокал & Чанты (Vox)' : 'Vox & Chants', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Vox'), icon: 'ti-microphone', color: '#fd9644' },
-    { title: isRu ? 'Спецэффекты (FX & Risers)' : 'FX & Risers', items: kitSounds.filter(s => normalizeTag(s.tag) === 'FX'), icon: 'ti-bolt', color: '#26de81' },
-    { title: isRu ? 'Мелодии (Melodic One-Shots)' : 'Melodic One-Shots', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Melody'), icon: 'ti-music', color: '#9a90ff' },
-    { title: isRu ? 'Аккорды & Клавишные' : 'Chords & Keys', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Chords'), icon: 'ti-piano', color: '#71c89f' },
-    { title: isRu ? 'Лиды & Синты (Leads)' : 'Leads & Synths', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Lead'), icon: 'ti-wand', color: '#a55eea' },
-    { title: isRu ? 'Плаки & Гитары (Plucks)' : 'Plucks & Guitars', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Pluck'), icon: 'ti-guitar-pick', color: '#38ada9' },
-    { title: isRu ? 'Прочие инструменты' : 'Other Sounds', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Other'), icon: 'ti-dots', color: '#8a92a1' },
+    { title: isRu ? '808s' : '808s', items: kitSounds.filter(s => normalizeTag(s.tag) === '808'), icon: 'ti-flame', color: 'var(--muted)' },
+    { title: isRu ? 'Бас (Basses)' : 'Basses', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Bass'), icon: 'ti-wave-sine', color: 'var(--muted)' },
+    { title: isRu ? 'Кики (Kicks)' : 'Kicks', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Kick'), icon: 'ti-circle-dot', color: 'var(--muted)' },
+    { title: isRu ? 'Снейры (Snares)' : 'Snares', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Snare'), icon: 'ti-circle-dashed', color: 'var(--muted)' },
+    { title: isRu ? 'Клэпы (Claps)' : 'Claps', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Clap'), icon: 'ti-hand-stop', color: 'var(--muted)' },
+    { title: isRu ? 'Римы (Rims)' : 'Rims', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Rim'), icon: 'ti-crosshair', color: 'var(--muted)' },
+    { title: isRu ? 'Хэты (Hi-Hats Closed)' : 'Hi-Hats (Closed)', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Hi-Hat'), icon: 'ti-sparkles', color: 'var(--muted)' },
+    { title: isRu ? 'Открытые хэты (Open Hats)' : 'Open Hats', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Open Hat'), icon: 'ti-ripple', color: 'var(--muted)' },
+    { title: isRu ? 'Крэши & Тарелки (Crashes)' : 'Crashes & Cymbals', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Crash'), icon: 'ti-sun', color: 'var(--muted)' },
+    { title: isRu ? 'Перкуссия (Percs)' : 'Percs', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Perc'), icon: 'ti-grain', color: 'var(--muted)' },
+    { title: isRu ? 'Томы (Toms)' : 'Toms', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Tom'), icon: 'ti-circles', color: 'var(--muted)' },
+    { title: isRu ? 'Вокал & Чанты (Vox)' : 'Vox & Chants', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Vox'), icon: 'ti-microphone', color: 'var(--muted)' },
+    { title: isRu ? 'Спецэффекты (FX & Risers)' : 'FX & Risers', items: kitSounds.filter(s => normalizeTag(s.tag) === 'FX'), icon: 'ti-bolt', color: 'var(--muted)' },
+    { title: isRu ? 'Мелодии (Melodic One-Shots)' : 'Melodic One-Shots', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Melody'), icon: 'ti-music', color: 'var(--muted)' },
+    { title: isRu ? 'Аккорды & Клавишные' : 'Chords & Keys', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Chords'), icon: 'ti-piano', color: 'var(--muted)' },
+    { title: isRu ? 'Лиды & Синты (Leads)' : 'Leads & Synths', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Lead'), icon: 'ti-wand', color: 'var(--muted)' },
+    { title: isRu ? 'Плаки & Гитары (Plucks)' : 'Plucks & Guitars', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Pluck'), icon: 'ti-guitar-pick', color: 'var(--muted)' },
+    { title: isRu ? 'Прочие инструменты' : 'Other Sounds', items: kitSounds.filter(s => normalizeTag(s.tag) === 'Other'), icon: 'ti-dots', color: 'var(--muted)' },
   ].filter(c => c.items.length > 0);
 
   const handleQuickCreate = () => {
@@ -233,15 +242,14 @@ export const KitBuilder: React.FC = () => {
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 280 }}>
           <div
             style={{
-              width: 44,
-              height: 44,
-              borderRadius: 14,
-              background: 'linear-gradient(135deg, #6366f1, #9a90ff, #ec4899)',
+              width: 40,
+              height: 40,
+              borderRadius: 10,
+              background: 'color-mix(in srgb, var(--text) 6%, transparent)',
               display: 'grid',
               placeItems: 'center',
-              color: '#fff',
-              boxShadow: '0 6px 20px rgba(154, 144, 255, 0.25)',
-              fontSize: 22,
+              color: 'var(--muted)',
+              fontSize: 20,
               flexShrink: 0,
             }}
           >
@@ -250,14 +258,12 @@ export const KitBuilder: React.FC = () => {
           <div>
             <div
               style={{
-                fontSize: 10,
-                fontWeight: 700,
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em',
-                color: 'var(--accent)',
+                fontSize: 11,
+                fontWeight: 600,
+                color: 'var(--soft)',
               }}
             >
-              {isRu ? 'Конструктор Драм-кита' : 'Drum Kit Builder'}
+              {isRu ? 'Драм-кит' : 'Drum kit'}
             </div>
             <div style={{ position: 'relative', marginTop: 4, display: 'flex', alignItems: 'center', gap: '8px' }}>
               {/* Kit Switcher Dropdown Button */}
@@ -321,7 +327,7 @@ export const KitBuilder: React.FC = () => {
                   title={isRu ? 'Удалить этот набор' : 'Delete Kit'}
                   type="button"
                 >
-                  <i className="ti ti-trash" style={{ color: 'var(--danger, #ff4757)' }} />
+                  <i className="ti ti-trash" style={{ color: 'var(--danger)' }} />
                 </button>
               )}
             </div>
@@ -371,11 +377,8 @@ export const KitBuilder: React.FC = () => {
             top: dropdownCoords.top,
             width: 240,
             padding: '10px',
-            borderRadius: 18,
+            borderRadius: 'var(--radius-panel)',
             zIndex: 999999,
-            backgroundColor: '#161b26',
-            border: '1px solid rgba(255, 255, 255, 0.16)',
-            boxShadow: '0 24px 60px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.1)',
             display: 'flex',
             flexDirection: 'column',
             gap: 4,
@@ -384,13 +387,11 @@ export const KitBuilder: React.FC = () => {
         >
           <div
             style={{
-              fontSize: 10,
-              fontWeight: 700,
-              textTransform: 'uppercase',
-              letterSpacing: '0.06em',
+              fontSize: 11,
+              fontWeight: 600,
               color: 'var(--muted)',
               padding: '2px 6px 6px',
-              borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+              borderBottom: '1px solid var(--line)',
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
@@ -411,31 +412,10 @@ export const KitBuilder: React.FC = () => {
                     setActiveKit(k.id);
                     setIsKitSelectorOpen(false);
                   }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '8px 10px',
-                    borderRadius: 8,
-                    fontSize: 12,
-                    fontWeight: k.id === activeKitId ? 700 : 500,
-                    color: k.id === activeKitId ? 'var(--accent)' : 'var(--text)',
-                    background: k.id === activeKitId ? 'var(--accent-soft)' : 'rgba(255, 255, 255, 0.03)',
-                    border: k.id === activeKitId ? '1px solid rgba(154, 144, 255, 0.35)' : '1px solid transparent',
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    transition: 'all 0.15s ease',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (k.id !== activeKitId) e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)';
-                  }}
-                  onMouseLeave={(e) => {
-                    if (k.id !== activeKitId) e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
-                  }}
+                  className={`menu-option${k.id === activeKitId ? ' is-current' : ''}`}
+                  aria-pressed={k.id === activeKitId}
                 >
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {k.name}
-                  </span>
+                  <span>{k.name}</span>
                   <span style={{ fontSize: 10, color: 'var(--soft)', marginLeft: 8, flexShrink: 0 }}>
                     {count} {isRu ? 'эл.' : 'items'}
                   </span>
@@ -444,7 +424,7 @@ export const KitBuilder: React.FC = () => {
             })}
           </div>
 
-          <div style={{ height: 1, background: 'rgba(255, 255, 255, 0.08)', margin: '4px 0' }} />
+          <div style={{ height: 1, background: 'var(--line)', margin: '4px 0' }} />
 
           {isCreatingKit ? (
             <form onSubmit={handleCreateNewKit} style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '2px' }}>
@@ -527,12 +507,11 @@ export const KitBuilder: React.FC = () => {
             style={{
               width: 60,
               height: 60,
-              borderRadius: 18,
-              background: 'var(--accent-soft)',
+              borderRadius: 12,
+              background: 'color-mix(in srgb, var(--text) 6%, transparent)',
               display: 'grid',
               placeItems: 'center',
-              boxShadow: '0 12px 30px rgba(154, 144, 255, 0.15)',
-              color: 'var(--accent)',
+              color: 'var(--muted)',
               fontSize: 30,
             }}
           >
@@ -540,7 +519,7 @@ export const KitBuilder: React.FC = () => {
           </div>
           <div>
             <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>
-              {isRu ? 'Ваш пользовательский кит пуст' : 'Your Custom Kit is Empty'}
+              {isRu ? 'Кит пуст' : 'Kit is empty'}
             </div>
             <div
               style={{
@@ -592,8 +571,8 @@ export const KitBuilder: React.FC = () => {
                       width: 26,
                       height: 26,
                       borderRadius: 8,
-                      background: 'rgba(154, 144, 255, 0.18)',
-                      color: 'var(--accent)',
+                      background: 'color-mix(in srgb, var(--text) 7%, transparent)',
+                      color: 'var(--muted)',
                       display: 'grid',
                       placeItems: 'center',
                       fontSize: 14,
@@ -611,8 +590,8 @@ export const KitBuilder: React.FC = () => {
                     fontWeight: 700,
                     padding: '3px 9px',
                     borderRadius: 10,
-                    background: 'rgba(154, 144, 255, 0.12)',
-                    color: 'var(--accent)',
+                    background: 'var(--field)',
+                    color: 'var(--muted)',
                   }}
                 >
                   {melodicPatterns.length} {isRu ? 'паттернов' : 'patterns'}
@@ -668,7 +647,7 @@ export const KitBuilder: React.FC = () => {
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                       {cat.items.map((pat: any) => {
-                        const isCurPlaying = isPlaying && currentlyPlayingId === pat.id;
+                        const isCurPlaying = playingKey === `pattern:${pat.id}`;
                         return (
                           <div
                             key={pat.id}
@@ -680,8 +659,8 @@ export const KitBuilder: React.FC = () => {
                               justifyContent: 'space-between',
                               padding: '6px 9px',
                               borderRadius: 9,
-                              background: 'rgba(255, 255, 255, 0.03)',
-                              border: '1px solid rgba(255, 255, 255, 0.05)',
+                              background: 'color-mix(in srgb, var(--text) 3%, transparent)',
+                              border: '1px solid var(--line-dark)',
                               cursor: 'grab',
                             }}
                             title={isRu ? 'Перетащите в FL Studio / DAW' : 'Drag to DAW'}
@@ -694,8 +673,8 @@ export const KitBuilder: React.FC = () => {
                                   width: 24,
                                   height: 24,
                                   borderRadius: '50%',
-                                  background: isCurPlaying ? 'var(--accent)' : 'rgba(255, 255, 255, 0.08)',
-                                  color: isCurPlaying ? '#000' : 'var(--text)',
+                                  background: isCurPlaying ? 'var(--accent)' : 'color-mix(in srgb, var(--text) 8%, transparent)',
+                                  color: isCurPlaying ? 'var(--contrast-text)' : 'var(--text)',
                                   border: 'none',
                                   cursor: 'pointer',
                                   display: 'grid',
@@ -757,8 +736,8 @@ export const KitBuilder: React.FC = () => {
                       width: 26,
                       height: 26,
                       borderRadius: 8,
-                      background: 'rgba(255, 159, 67, 0.18)',
-                      color: '#ff9f43',
+                      background: 'color-mix(in srgb, var(--text) 7%, transparent)',
+                      color: 'var(--muted)',
                       display: 'grid',
                       placeItems: 'center',
                       fontSize: 14,
@@ -776,8 +755,8 @@ export const KitBuilder: React.FC = () => {
                     fontWeight: 700,
                     padding: '3px 9px',
                     borderRadius: 10,
-                    background: 'rgba(255, 159, 67, 0.12)',
-                    color: '#ff9f43',
+                    background: 'var(--field)',
+                    color: 'var(--muted)',
                   }}
                 >
                   {drumPatterns.length} {isRu ? 'паттернов' : 'patterns'}
@@ -833,7 +812,7 @@ export const KitBuilder: React.FC = () => {
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                       {cat.items.map((pat: any) => {
-                        const isCurPlaying = isPlaying && currentlyPlayingId === pat.id;
+                        const isCurPlaying = playingKey === `pattern:${pat.id}`;
                         return (
                           <div
                             key={pat.id}
@@ -845,8 +824,8 @@ export const KitBuilder: React.FC = () => {
                               justifyContent: 'space-between',
                               padding: '6px 9px',
                               borderRadius: 9,
-                              background: 'rgba(255, 255, 255, 0.03)',
-                              border: '1px solid rgba(255, 255, 255, 0.05)',
+                              background: 'color-mix(in srgb, var(--text) 3%, transparent)',
+                              border: '1px solid var(--line-dark)',
                               cursor: 'grab',
                             }}
                             title={isRu ? 'Перетащите в FL Studio / DAW' : 'Drag to DAW'}
@@ -859,8 +838,8 @@ export const KitBuilder: React.FC = () => {
                                   width: 24,
                                   height: 24,
                                   borderRadius: '50%',
-                                  background: isCurPlaying ? 'var(--accent)' : 'rgba(255, 255, 255, 0.08)',
-                                  color: isCurPlaying ? '#000' : 'var(--text)',
+                                  background: isCurPlaying ? 'var(--accent)' : 'color-mix(in srgb, var(--text) 8%, transparent)',
+                                  color: isCurPlaying ? 'var(--contrast-text)' : 'var(--text)',
                                   border: 'none',
                                   cursor: 'pointer',
                                   display: 'grid',
@@ -922,8 +901,8 @@ export const KitBuilder: React.FC = () => {
                       width: 26,
                       height: 26,
                       borderRadius: 8,
-                      background: 'rgba(72, 219, 251, 0.18)',
-                      color: '#48dbfb',
+                      background: 'color-mix(in srgb, var(--text) 7%, transparent)',
+                      color: 'var(--muted)',
                       display: 'grid',
                       placeItems: 'center',
                       fontSize: 14,
@@ -941,8 +920,8 @@ export const KitBuilder: React.FC = () => {
                     fontWeight: 700,
                     padding: '3px 9px',
                     borderRadius: 10,
-                    background: 'rgba(72, 219, 251, 0.12)',
-                    color: '#48dbfb',
+                    background: 'var(--field)',
+                    color: 'var(--muted)',
                   }}
                 >
                   {kitSounds.length} {isRu ? 'звуков' : 'sounds'}
@@ -998,7 +977,7 @@ export const KitBuilder: React.FC = () => {
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                       {cat.items.map((sound: any) => {
-                        const isCurPlaying = isPlaying && currentlyPlayingId === sound.id;
+                        const isCurPlaying = playingKey === `sound:${sound.id}`;
                         const cleanTitle = (sound.channel_name || '').trim() || sound.sample_name || 'Sound';
                         return (
                           <div
@@ -1011,8 +990,8 @@ export const KitBuilder: React.FC = () => {
                               justifyContent: 'space-between',
                               padding: '6px 9px',
                               borderRadius: 9,
-                              background: 'rgba(255, 255, 255, 0.03)',
-                              border: '1px solid rgba(255, 255, 255, 0.05)',
+                              background: 'color-mix(in srgb, var(--text) 3%, transparent)',
+                              border: '1px solid var(--line-dark)',
                               cursor: 'grab',
                             }}
                             title={isRu ? 'Перетащите в FL Studio / DAW' : 'Drag to DAW'}
@@ -1025,8 +1004,8 @@ export const KitBuilder: React.FC = () => {
                                   width: 24,
                                   height: 24,
                                   borderRadius: '50%',
-                                  background: isCurPlaying ? 'var(--accent)' : 'rgba(255, 255, 255, 0.08)',
-                                  color: isCurPlaying ? '#000' : 'var(--text)',
+                                  background: isCurPlaying ? 'var(--accent)' : 'color-mix(in srgb, var(--text) 8%, transparent)',
+                                  color: isCurPlaying ? 'var(--contrast-text)' : 'var(--text)',
                                   border: 'none',
                                   cursor: 'pointer',
                                   display: 'grid',

@@ -1,5 +1,6 @@
 import os
 import glob
+import math
 import shutil
 import tempfile
 import logging
@@ -8,6 +9,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, BackgroundTasks, Query, HTTPException, Response, UploadFile, File
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 import sys
@@ -194,6 +196,115 @@ async def upload_and_scan(files: List[UploadFile] = File(...)):
         for f in files:
             await f.close()
 
+VISUALIZER_MAX_UPLOAD = 256 * 1024 * 1024
+
+
+def _visualizer_patterns(data: dict) -> List[dict]:
+    """Note parts of a parsed project, without vault-only fields such as MIDI bytes or sample paths."""
+    parts = []
+    for pattern in data.get("patterns", []):
+        if not pattern.get("notes"):
+            continue
+        part = {
+            "pattern_index": pattern.get("pattern_index", 0),
+            "pattern_name": pattern.get("pattern_name", "Pattern"),
+            "channel_index": pattern.get("channel_index", 0),
+            "channel_name": pattern.get("channel_name", "Channel"),
+            "tag": pattern.get("tag", "Other"),
+            "bars": pattern.get("bars", 1),
+            "key_root": pattern.get("key", "—"),
+            "note_count": pattern.get("note_count", 0),
+            "tempo": pattern.get("tempo", data.get("tempo", 140)),
+            "ppq": pattern.get("ppq", data.get("ppq", 96)),
+            "notes": pattern.get("notes", []),
+        }
+        if (pattern.get("loop_ticks") or 0) > 0:
+            # Manual pattern length: the period song clips of this pattern repeat at.
+            part["loop_ticks"] = pattern["loop_ticks"]
+        parts.append(part)
+    return parts
+
+
+def _visualizer_song(song: Optional[dict], pattern_indexes: set) -> Optional[dict]:
+    """Playlist clips of the returned note parts only; positions stay absolute so silence is preserved."""
+    if not isinstance(song, dict):
+        return None
+    clips = []
+    for clip in song.get("clips") or []:
+        try:
+            pattern_index = int(clip["pattern_index"])
+            position = int(clip["position"])
+            length = int(clip["length"])
+            offset = float(clip.get("offset") or 0)
+            track = int(clip.get("track") or 0)
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+        if pattern_index not in pattern_indexes or position < 0 or length <= 0:
+            continue
+        clips.append({
+            "pattern_index": pattern_index,
+            "position": position,
+            "length": length,
+            "offset": int(offset) if math.isfinite(offset) and offset > 0 else 0,
+            "track": max(0, track),
+        })
+    if not clips:
+        return None
+    clips.sort(key=lambda clip: (clip["position"], clip["track"], clip["pattern_index"]))
+    return {"ticks": max(clip["position"] + clip["length"] for clip in clips), "clips": clips}
+
+
+@app.post("/api/visualizer/parse-flp")
+async def parse_flp_for_visualizer(file: UploadFile = File(...)):
+    """Read an FL Studio project for preview without adding it to the vault."""
+    try:
+        if not file.filename or not file.filename.lower().endswith(".flp"):
+            raise HTTPException(status_code=415, detail="Only FL Studio projects (.flp) can be opened here.")
+
+        safe_name = os.path.basename(file.filename.replace("\\", "/")).strip() or "Project.flp"
+        with tempfile.TemporaryDirectory(prefix="stasher_visualizer_") as temp_dir:
+            # Fixed on-disk name: user file names can be too long or odd for the file system.
+            path = os.path.join(temp_dir, "project.flp")
+            written = 0
+            with open(path, "wb") as buffer:
+                while chunk := await file.read(1024 * 1024):
+                    written += len(chunk)
+                    if written > VISUALIZER_MAX_UPLOAD:
+                        raise HTTPException(status_code=413, detail="This FLP file is larger than 256 MB.")
+                    buffer.write(chunk)
+
+            if written == 0:
+                raise HTTPException(status_code=422, detail="The FLP file is empty.")
+            with open(path, "rb") as handle:
+                if handle.read(4) != b"FLhd":
+                    raise HTTPException(status_code=422, detail="This file is not an FL Studio project.")
+
+            try:
+                data = await run_in_threadpool(parse_flp_project, path, include_song=True, display_name=safe_name, resolve_samples=False)
+            except Exception as err:
+                logger.warning(f"Visualizer could not parse {safe_name}: {err}")
+                data = None
+            if not data:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Could not read this FL Studio project. It may be damaged or saved in an unsupported format.",
+                )
+
+            patterns = _visualizer_patterns(data)
+            if not patterns:
+                raise HTTPException(status_code=422, detail="No notes were found in the patterns of this project.")
+
+            return {
+                "file_name": safe_name,
+                "title": data.get("title") or os.path.splitext(safe_name)[0],
+                "tempo": data.get("tempo", 140),
+                "ppq": data.get("ppq", 96),
+                "patterns": patterns,
+                "song": _visualizer_song(data.get("song"), {pattern["pattern_index"] for pattern in patterns}),
+            }
+    finally:
+        await file.close()
+
 @app.get("/api/scan/progress")
 def get_scan_progress():
     return scan_progress
@@ -206,8 +317,9 @@ def list_patterns(
     min_bpm: Optional[float] = None,
     max_bpm: Optional[float] = None,
     project_id: Optional[int] = None,
-    limit: int = 200,
-    offset: int = 0
+    # The UI pages by 200 and refreshes up to 2000 already-loaded rows; the cap keeps one request bounded.
+    limit: int = Query(200, ge=1, le=5000),
+    offset: int = Query(0, ge=0)
 ):
     return query_patterns(
         search=search,
@@ -239,8 +351,9 @@ def list_sounds(
     search: Optional[str] = None,
     tag: Optional[str] = None,
     project_id: Optional[int] = None,
-    limit: int = 200,
-    offset: int = 0
+    # The UI pages by 200 and refreshes up to 2000 already-loaded rows; the cap keeps one request bounded.
+    limit: int = Query(200, ge=1, le=5000),
+    offset: int = Query(0, ge=0)
 ):
     return query_sounds(
         search=search,
@@ -387,7 +500,7 @@ class BatchTagRequest(BaseModel):
     ids: List[int]
     tag: str
 
-@app.patch("/api/sounds/{sound_id}")
+@app.patch("/api/sounds/{sound_id:int}")
 def update_sound_endpoint(sound_id: int, req: UpdateItemRequest):
     try:
         update_sound(sound_id, req.name, req.tag)
@@ -396,7 +509,7 @@ def update_sound_endpoint(sound_id: int, req: UpdateItemRequest):
         logger.error(f"Error updating sound {sound_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.patch("/api/patterns/{pattern_id}")
+@app.patch("/api/patterns/{pattern_id:int}")
 def update_pattern_endpoint(pattern_id: int, req: UpdateItemRequest):
     try:
         update_pattern(pattern_id, req.name, req.tag)

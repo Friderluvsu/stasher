@@ -1,12 +1,13 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useVaultStore } from './state/vaultStore';
 import { useInterfaceStore } from './state/interfaceStore';
-import { useMouseSpotlight } from './hooks/useMouseSpotlight';
 import { Sidebar } from './components/Sidebar';
 import { Topbar } from './components/Topbar';
 import { PatternCard } from './components/PatternCard';
 import { SoundCard } from './components/SoundCard';
 import { KitBuilder } from './components/KitBuilder';
+import { MidiVisualizer } from './components/MidiVisualizer';
 import { SectionTransitionView } from './components/SectionTransitionView';
 import { ToastContainer } from './components/ToastContainer';
 import { ConfirmDialog } from './components/ConfirmDialog';
@@ -19,21 +20,43 @@ export default function App() {
   const {
     activeTab,
     patterns, sounds, projects,
+    totalPatterns, totalSounds, loadMorePatterns, loadMoreSounds,
     selectedTag,
     selectedProjectId, setSelectedProjectId,
     fetchPatterns, fetchSounds, fetchProjects, fetchKits, seedDemoData,
     startScan, uploadAndScan, isScanning, scanProgress,
     deleteProject,
-    selectedSoundIds, selectedPatternIds,
-    selectAllSounds, selectAllPatterns
-  } = useVaultStore();
+    selectAllSounds, selectAllPatterns,
+    isLoadingPatterns, isLoadingSounds,
+    searchQuery,
+    allSoundsSelected, allPatternsSelected,
+  } = useVaultStore(useShallow((s) => ({
+    activeTab: s.activeTab,
+    patterns: s.patterns, sounds: s.sounds, projects: s.projects,
+    totalPatterns: s.totalPatterns, totalSounds: s.totalSounds,
+    loadMorePatterns: s.loadMorePatterns, loadMoreSounds: s.loadMoreSounds,
+    selectedTag: s.selectedTag,
+    selectedProjectId: s.selectedProjectId, setSelectedProjectId: s.setSelectedProjectId,
+    fetchPatterns: s.fetchPatterns, fetchSounds: s.fetchSounds, fetchProjects: s.fetchProjects, fetchKits: s.fetchKits,
+    seedDemoData: s.seedDemoData,
+    startScan: s.startScan, uploadAndScan: s.uploadAndScan, isScanning: s.isScanning, scanProgress: s.scanProgress,
+    deleteProject: s.deleteProject,
+    selectAllSounds: s.selectAllSounds, selectAllPatterns: s.selectAllPatterns,
+    isLoadingPatterns: s.isLoadingPatterns, isLoadingSounds: s.isLoadingSounds,
+    searchQuery: s.searchQuery,
+    // Booleans instead of the id arrays: App (and its list) re-renders when "all selected" flips, not on every checkbox.
+    allSoundsSelected: s.sounds.length > 0 && s.selectedSoundIds.length === s.sounds.length,
+    allPatternsSelected: s.patterns.length > 0 && s.selectedPatternIds.length === s.patterns.length,
+  })));
 
   const { theme, language } = useInterfaceStore();
   const isRu = language === 'ru';
 
   const [projectToDelete, setProjectToDelete] = useState<ProjectItem | null>(null);
+  const [visualizerOpened, setVisualizerOpened] = useState(false);
+  // Set during render (not in an effect) so the first visit mounts the visualizer in the same frame.
+  if (activeTab === 'visualizer' && !visualizerOpened) setVisualizerOpened(true);
 
-  useMouseSpotlight();
 
   // Manage platform & theme dataset attributes on body & html
   useEffect(() => {
@@ -207,6 +230,14 @@ export default function App() {
   };
 
   const currentProject = selectedProjectId ? projects.find((p) => p.id === selectedProjectId) : null;
+  const isFiltered = selectedTag !== 'All' || Boolean(searchQuery.trim()) || selectedProjectId !== null;
+
+  const resetFilters = useCallback(() => {
+    const store = useVaultStore.getState();
+    if (store.searchQuery) store.setSearchQuery('');
+    if (store.selectedProjectId !== null) store.setSelectedProjectId(null);
+    if (store.selectedTag !== 'All') store.setSelectedTag('All');
+  }, []);
 
   return (
     <div className="app-atmosphere">
@@ -235,22 +266,19 @@ export default function App() {
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  background: 'rgba(154, 144, 255, 0.08)',
+                  background: 'color-mix(in srgb, var(--popover-surface) 88%, transparent)',
                   borderRadius: 'var(--radius-panel)',
-                  border: '2px dashed var(--accent)',
-                  backdropFilter: 'blur(16px)',
-                  WebkitBackdropFilter: 'blur(16px)',
+                  border: '1.5px dashed color-mix(in srgb, var(--text) 35%, transparent)',
                   pointerEvents: 'none',
-                  boxShadow: '0 0 50px rgba(154, 144, 255, 0.25)',
                 }}
               >
                 <div style={{ textAlign: 'center' }}>
-                  <i className="ti ti-folder-plus text-5xl text-[var(--accent)] block mb-3" />
-                  <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--text)' }}>
-                    {isRu ? 'Перетащите FL Studio Проекты Сюда' : 'Drop FL Studio Projects Here'}
+                  <i className="ti ti-folder-plus text-4xl text-[var(--muted)] block mb-3" />
+                  <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)' }}>
+                    {isRu ? 'Отпустите, чтобы добавить проекты' : 'Drop to add projects'}
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>
-                    {isRu ? 'Автоматическое извлечение MIDI и One-Shot семплов из .flp' : 'Drop .flp files or folders to automatically extract MIDI & sounds'}
+                    {isRu ? 'Файлы .flp или папки — MIDI и семплы извлекутся сами' : '.flp files or folders — MIDI and samples are extracted automatically'}
                   </div>
                 </div>
               </div>
@@ -262,26 +290,24 @@ export default function App() {
                 style={{
                   margin: '0 28px 16px',
                   padding: '14px 20px',
-                  borderRadius: 18,
+                  borderRadius: 12,
                   display: 'flex',
                   alignItems: 'center',
                   gap: 14,
-                  background: 'var(--accent-soft)',
-                  borderColor: 'rgba(154, 144, 255, 0.35)',
                 }}
               >
-                <i className="ti ti-loader-2 text-[var(--accent)] text-xl animate-spin" />
+                <i className="ti ti-loader-2 text-[var(--muted)] text-xl animate-spin" />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
-                    {isRu ? 'Сканирование и извлечение данных...' : 'Scanning & Extracting Patterns…'}
+                    {isRu ? 'Сканирование проектов…' : 'Scanning projects…'}
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2, fontFamily: 'monospace' }}>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2, fontVariantNumeric: 'tabular-nums' }} className="truncate">
                     {scanProgress.current_file || (isRu ? 'Чтение проектов…' : 'Reading projects…')}
                     {scanProgress.total > 0 && ` — ${scanProgress.scanned}/${scanProgress.total}`}
                   </div>
                 </div>
                 {scanProgress.total > 0 && (
-                  <div style={{ width: 140, height: 6, borderRadius: 999, background: 'rgba(255,255,255,0.1)', overflow: 'hidden' }}>
+                  <div style={{ width: 140, height: 4, borderRadius: 999, background: 'color-mix(in srgb, var(--text) 10%, transparent)', overflow: 'hidden' }}>
                     <div
                       style={{
                         height: '100%',
@@ -297,13 +323,13 @@ export default function App() {
             )}
 
             {/* Active Project Filter Banner */}
-            {currentProject && (
+            {currentProject && activeTab !== 'visualizer' && (
               <div
                 className="glass-panel"
                 style={{
                   margin: '0 28px 16px',
                   padding: '12px 18px',
-                  borderRadius: 16,
+                  borderRadius: 'var(--radius-panel)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
@@ -312,7 +338,7 @@ export default function App() {
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                  <i className="ti ti-folder text-[var(--accent)] text-lg shrink-0" />
+                  <i className="ti ti-folder text-[var(--muted)] text-lg shrink-0" />
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }} className="truncate">
                       {currentProject.title}
@@ -348,6 +374,14 @@ export default function App() {
               </div>
             )}
 
+            {/* The visualizer stays mounted once opened (hidden on other tabs): leaving the tab used to drop its
+                imports, audio and any running export. It ignores the sidebar filters, so its section key is constant. */}
+            {visualizerOpened && (
+              <SectionTransitionView sectionKey="visualizer" hidden={activeTab !== 'visualizer'}>
+                <MidiVisualizer active={activeTab === 'visualizer'} />
+              </SectionTransitionView>
+            )}
+            {activeTab !== 'visualizer' && (
             <SectionTransitionView sectionKey={`${activeTab}:${selectedProjectId || 'all'}:${selectedTag}`}>
               {activeTab === 'kit' ? (
                 <KitBuilder />
@@ -355,16 +389,10 @@ export default function App() {
                 <div className="workspace-content" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <div className="page-heading flex items-start justify-between">
                     <div>
-                      <p className="eyebrow">{isRu ? 'Хранилище аудио' : 'Audio Library'}</p>
                       <div className="title-line">
-                        <h1>{isRu ? 'StashSound Семплы' : 'StashSound Samples'}</h1>
-                        <span>{sounds.length}</span>
+                        <h1>{isRu ? 'Семплы' : 'Samples'}</h1>
+                        <span>{Math.max(totalSounds, sounds.length)}</span>
                       </div>
-                      <p className="page-description">
-                        {isRu
-                          ? 'Все ваншоты, 808, кики, снейры, хэты и перкуссия, автоматически извлеченные из ваших FL Studio проектов.'
-                          : 'Every drum one-shot, 808, kick, snare, hat, and percussion extracted directly from your FL Studio project files.'}
-                      </p>
                     </div>
 
                     {sounds.length > 0 && (
@@ -377,13 +405,13 @@ export default function App() {
                       >
                         <i
                           className={`ti ${
-                            selectedSoundIds.length === sounds.length && sounds.length > 0
+                            allSoundsSelected
                               ? 'ti-checkbox'
                               : 'ti-square-check'
-                          } text-sm text-[var(--accent)]`}
+                          } text-sm text-[var(--muted)]`}
                         />
                         <span>
-                          {selectedSoundIds.length === sounds.length && sounds.length > 0
+                          {allSoundsSelected
                             ? isRu
                               ? 'Снять все'
                               : 'Deselect All'
@@ -396,65 +424,26 @@ export default function App() {
                   </div>
 
                   {sounds.length === 0 && !isScanning ? (
-                    <div
-                      className="glass-card"
-                      style={{
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        padding: '60px 24px',
-                        textAlign: 'center',
-                        gap: 16,
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: 60,
-                          height: 60,
-                          borderRadius: 18,
-                          background: 'var(--accent-soft)',
-                          display: 'grid',
-                          placeItems: 'center',
-                          boxShadow: '0 12px 30px rgba(154, 144, 255, 0.15)',
-                          color: 'var(--accent)',
-                          fontSize: 28,
-                        }}
-                      >
-                        <i className="ti ti-volume" />
-                      </div>
-                      <div>
-                        <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>
-                          {isRu ? 'Аудиосемплы не найдены' : 'No Audio Samples Found'}
-                        </div>
-                        <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4, maxWidth: 400, lineHeight: '1.5' }}>
-                          {isRu
-                            ? 'Перетащите FL Studio проекты (.flp) в окно, чтобы извлечь все используемые барабанные ваншоты и звуки.'
-                            : 'Drag & drop your FL Studio projects to extract all 808s, kicks, snares, and drum samples.'}
-                        </div>
-                      </div>
-                      
-                    </div>
+                    isLoadingSounds ? null : (
+                      <LibraryEmptyState kind="sounds" isFiltered={isFiltered} isRu={isRu} onReset={resetFilters} />
+                    )
                   ) : (
-                    sounds.map((sound) => (
-                      <SoundCard key={sound.id} sound={sound} />
-                    ))
+                    <>
+                      {sounds.map((sound) => (
+                        <SoundCard key={sound.id} sound={sound} />
+                      ))}
+                      <LoadMoreRow items={sounds} total={totalSounds} onLoadMore={loadMoreSounds} isRu={isRu} />
+                    </>
                   )}
                 </div>
               ) : (
                 <div className="workspace-content" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <div className="page-heading flex items-start justify-between">
                     <div>
-                      <p className="eyebrow">{isRu ? 'MIDI Хранилище' : 'MIDI Vault'}</p>
                       <div className="title-line">
                         <h1>{isRu ? 'MIDI Паттерны' : 'MIDI Patterns'}</h1>
-                        <span>{patterns.length}</span>
+                        <span>{Math.max(totalPatterns, patterns.length)}</span>
                       </div>
-                      <p className="page-description">
-                        {isRu
-                          ? 'Мелодии, аккорды, бас-линии и драм-паттерны с поддержкой прямого drag-and-drop в FL Studio, Ableton и любую DAW.'
-                          : 'Melodies, chord progressions, 808 slides, and drum grooves with instant drag-and-drop to your DAW.'}
-                      </p>
                     </div>
 
                     {patterns.length > 0 && (
@@ -467,13 +456,13 @@ export default function App() {
                       >
                         <i
                           className={`ti ${
-                            selectedPatternIds.length === patterns.length && patterns.length > 0
+                            allPatternsSelected
                               ? 'ti-checkbox'
                               : 'ti-square-check'
-                          } text-sm text-[var(--accent)]`}
+                          } text-sm text-[var(--muted)]`}
                         />
                         <span>
-                          {selectedPatternIds.length === patterns.length && patterns.length > 0
+                          {allPatternsSelected
                             ? isRu
                               ? 'Снять все'
                               : 'Deselect All'
@@ -486,53 +475,21 @@ export default function App() {
                   </div>
 
                   {patterns.length === 0 && !isScanning ? (
-                    <div
-                      className="glass-card"
-                      style={{
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        padding: '60px 24px',
-                        textAlign: 'center',
-                        gap: 16,
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: 60,
-                          height: 60,
-                          borderRadius: 18,
-                          background: 'var(--accent-soft)',
-                          display: 'grid',
-                          placeItems: 'center',
-                          boxShadow: '0 12px 30px rgba(154, 144, 255, 0.15)',
-                          color: 'var(--accent)',
-                          fontSize: 28,
-                        }}
-                      >
-                        <i className="ti ti-music" />
-                      </div>
-                      <div>
-                        <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>
-                          {isRu ? 'Ваше MIDI Хранилище пусто' : 'Your MIDI Vault is Empty'}
-                        </div>
-                        <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4, maxWidth: 400, lineHeight: '1.5' }}>
-                          {isRu
-                            ? 'Перетащите файлы проектов (.flp) в окно, чтобы извлечь все партии мелодий, аккордов и ударных.'
-                            : 'Drag & drop your FL Studio project files (.flp) to extract every melody, chord progression, and 808 roll.'}
-                        </div>
-                      </div>
-                      
-                    </div>
+                    isLoadingPatterns ? null : (
+                      <LibraryEmptyState kind="patterns" isFiltered={isFiltered} isRu={isRu} onReset={resetFilters} />
+                    )
                   ) : (
-                    patterns.map((pattern) => (
-                      <PatternCard key={pattern.id} pattern={pattern} />
-                    ))
+                    <>
+                      {patterns.map((pattern) => (
+                        <PatternCard key={pattern.id} pattern={pattern} />
+                      ))}
+                      <LoadMoreRow items={patterns} total={totalPatterns} onLoadMore={loadMorePatterns} isRu={isRu} />
+                    </>
                   )}
                 </div>
               )}
             </SectionTransitionView>
+            )}
           </div>
         </div>
       </div>
@@ -556,6 +513,93 @@ export default function App() {
       />
 
       <ToastContainer />
+    </div>
+  );
+}
+
+interface LoadMoreRowProps {
+  items: readonly unknown[];
+  total: number;
+  onLoadMore: () => Promise<void>;
+  isRu: boolean;
+}
+
+// Rows arrive a page at a time; the next page starts loading well before the end of the list scrolls into view.
+// The button is the fallback when a page failed (the row is then already visible, so the observer will not fire again).
+function LoadMoreRow({ items, total, onLoadMore, isRu }: LoadMoreRowProps) {
+  const rowRef = useRef<HTMLDivElement>(null);
+  const loaded = items.length;
+  const hasMore = loaded < total;
+
+  useEffect(() => {
+    const row = rowRef.current;
+    if (!hasMore || !row) return;
+    const root = row.closest('.workspace-scroll-area');
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) void onLoadMore();
+      },
+      { root, rootMargin: '0px 0px 800px 0px' }
+    );
+    observer.observe(row);
+    return () => observer.disconnect();
+    // A new list (a page, a refresh, a retag) re-arms the observer: its first report re-checks the row. Without this,
+    // a row that appeared while the first fetch was still running (the page request is skipped then) never loaded more.
+  }, [hasMore, items, onLoadMore]);
+
+  if (!hasMore) return null;
+  return (
+    <div ref={rowRef} className="flex items-center justify-center" style={{ padding: '8px 0 16px' }}>
+      <button type="button" className="soft-button" style={{ minHeight: 32, fontSize: 12 }} onClick={() => void onLoadMore()}>
+        {isRu ? `Показать ещё (${loaded} из ${total})` : `Show more (${loaded} of ${total})`}
+      </button>
+    </div>
+  );
+}
+
+interface LibraryEmptyStateProps {
+  kind: 'patterns' | 'sounds';
+  isFiltered: boolean;
+  isRu: boolean;
+  onReset: () => void;
+}
+
+// An empty filtered view is not an empty vault: say which one it is and offer the way back.
+function LibraryEmptyState({ kind, isFiltered, isRu, onReset }: LibraryEmptyStateProps) {
+  if (isFiltered) {
+    return (
+      <div className="glass-card empty-state">
+        <div className="empty-state-icon"><i className="ti ti-filter-off" aria-hidden="true" /></div>
+        <div>
+          <h2>{isRu ? 'Ничего не найдено' : 'Nothing matches'}</h2>
+          <p>{isRu ? 'В этой категории, проекте или по этому запросу пусто.' : 'This category, project or search has no results.'}</p>
+        </div>
+        <button type="button" className="soft-button" style={{ minHeight: 32, fontSize: 12 }} onClick={onReset}>
+          {isRu ? 'Показать всё' : 'Show everything'}
+        </button>
+      </div>
+    );
+  }
+  const isSounds = kind === 'sounds';
+  return (
+    <div className="glass-card empty-state">
+      <div className="empty-state-icon"><i className={`ti ${isSounds ? 'ti-volume' : 'ti-music'}`} aria-hidden="true" /></div>
+      <div>
+        <h2>
+          {isSounds
+            ? (isRu ? 'Семплов пока нет' : 'No samples yet')
+            : (isRu ? 'MIDI-паттернов пока нет' : 'No MIDI patterns yet')}
+        </h2>
+        <p>
+          {isSounds
+            ? (isRu
+              ? 'Перетащите проекты FL Studio (.flp) в окно — Stasher извлечёт все семплы, которые в них используются.'
+              : 'Drop FL Studio projects (.flp) into the window and Stasher extracts every sample they use.')
+            : (isRu
+              ? 'Перетащите проекты FL Studio (.flp) в окно — Stasher извлечёт мелодии, аккорды и партии ударных.'
+              : 'Drop FL Studio projects (.flp) into the window and Stasher extracts melodies, chords and drum parts.')}
+        </p>
+      </div>
     </div>
   );
 }

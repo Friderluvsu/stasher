@@ -34,6 +34,16 @@ button {
   color: inherit;
 }
 
+::selection {
+  background: color-mix(in srgb, var(--text) 22%, transparent);
+  color: var(--text);
+}
+
+input,
+textarea {
+  caret-color: var(--text);
+}
+
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,

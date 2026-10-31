@@ -23,6 +23,7 @@ export interface PatternItem {
   project_title: string;
   project_file_name: string;
   project_file_path: string;
+  loop_ticks?: number;
 }
 
 export interface SoundItem {
@@ -45,6 +46,49 @@ export interface PatternsResponse {
   total: number;
   items: PatternItem[];
   tag_counts: Record<string, number>;
+}
+
+export interface VisualizerSongClip {
+  pattern_index: number;
+  position: number;
+  length: number;
+  offset: number;
+  track: number;
+}
+
+export interface VisualizerSong {
+  ticks: number;
+  clips: VisualizerSongClip[];
+}
+
+export interface VisualizerFlpResponse {
+  file_name: string;
+  title: string;
+  tempo: number;
+  ppq: number;
+  patterns: Pick<PatternItem, 'pattern_index' | 'pattern_name' | 'channel_index' | 'channel_name' | 'tag' | 'bars' | 'key_root' | 'note_count' | 'tempo' | 'ppq' | 'notes'>[];
+  song: VisualizerSong | null;
+}
+
+export type VisualizerApiErrorKind = 'offline' | 'unsupported' | 'too-large' | 'parse' | 'unknown';
+
+export class VisualizerApiError extends Error {
+  kind: VisualizerApiErrorKind;
+  status: number | null;
+
+  constructor(kind: VisualizerApiErrorKind, message: string, status: number | null = null) {
+    super(message);
+    this.name = 'VisualizerApiError';
+    this.kind = kind;
+    this.status = status;
+  }
+}
+
+function errorDetail(data: unknown): string {
+  const detail = (data as { detail?: unknown } | null)?.detail;
+  if (typeof detail === 'string') return detail.trim();
+  if (Array.isArray(detail)) return detail.map(item => typeof item === 'string' ? item : (item as { msg?: unknown })?.msg).filter(item => typeof item === 'string' && item).join('; ');
+  return '';
 }
 
 export interface SoundsResponse {
@@ -75,6 +119,32 @@ export interface KitExportRequest {
 const API_BASE = 'http://127.0.0.1:8765/api';
 
 export const api = {
+  async parseFlpForVisualizer(file: File, signal?: AbortSignal): Promise<VisualizerFlpResponse> {
+    const body = new FormData();
+    body.append('file', file);
+    let res: Response;
+    try {
+      res = await fetch(`${API_BASE}/visualizer/parse-flp`, { method: 'POST', body, signal });
+    } catch (error) {
+      if (signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) throw error;
+      throw new VisualizerApiError('offline', 'Stasher backend is not reachable');
+    }
+    if (!res.ok) {
+      const detail = errorDetail(await res.json().catch(() => null));
+      const kind: VisualizerApiErrorKind = res.status === 415 ? 'unsupported' : res.status === 413 ? 'too-large' : res.status === 422 ? 'parse' : 'unknown';
+      throw new VisualizerApiError(kind, detail || `FLP parsing failed (${res.status})`, res.status);
+    }
+    const data = await res.json().catch(() => null) as Partial<VisualizerFlpResponse> | null;
+    if (!data || typeof data !== 'object') throw new VisualizerApiError('unknown', 'Unexpected response from the Stasher backend', res.status);
+    return {
+      file_name: data.file_name || file.name,
+      title: data.title || file.name.replace(/\.flp$/i, ''),
+      tempo: data.tempo,
+      ppq: data.ppq,
+      patterns: Array.isArray(data.patterns) ? data.patterns : [],
+      song: data.song && Array.isArray(data.song.clips) ? data.song : null,
+    };
+  },
   async fetchPatterns(params: {
     search?: string;
     tag?: string;

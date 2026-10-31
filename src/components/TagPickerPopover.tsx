@@ -1,6 +1,59 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
 import { useInterfaceStore } from '../state/interfaceStore';
+import { canonicalTag, filterTags, tagIcon } from '../utils/tags';
+
+const GRID_COLUMNS = 3;
+const MENU_WIDTH = 300;
+const EDGE = 12;
+
+interface TagGridProps {
+  tags: string[];
+  currentTag: string;
+  highlighted?: number;
+  onPick: (tag: string) => void;
+  onHover?: (index: number) => void;
+}
+
+/** The 3-column tag grid shared by the picker popover and the edit dialog. */
+export const TagGrid: React.FC<TagGridProps> = ({ tags, currentTag, highlighted = -1, onPick, onHover }) => {
+  const current = canonicalTag(currentTag);
+  return (
+    <div className="tag-grid" role="listbox">
+      {tags.map((tag, index) => {
+        const isCurrent = Boolean(currentTag) && tag === current;
+        return (
+          <button
+            key={tag}
+            type="button"
+            role="option"
+            aria-selected={isCurrent}
+            className={`tag-option${isCurrent ? ' is-current' : ''}${index === highlighted ? ' is-highlighted' : ''}`}
+            onClick={() => onPick(tag)}
+            onMouseEnter={() => onHover?.(index)}
+          >
+            <i className={`ti ${tagIcon(tag)}`} aria-hidden="true" />
+            <span>{tag}</span>
+            {isCurrent && <i className="ti ti-check" aria-hidden="true" />}
+          </button>
+        );
+      })}
+    </div>
+  );
+};
+
+/** Arrow-key movement inside a grid of `count` items laid out in GRID_COLUMNS columns. */
+export function moveInGrid(key: string, index: number, count: number): number | null {
+  if (count === 0) return null;
+  const from = index < 0 ? 0 : index;
+  switch (key) {
+    case 'ArrowRight': return Math.min(count - 1, from + 1);
+    case 'ArrowLeft': return Math.max(0, from - 1);
+    case 'ArrowDown': return index < 0 ? 0 : Math.min(count - 1, from + GRID_COLUMNS);
+    case 'ArrowUp': return Math.max(0, from - GRID_COLUMNS);
+    default: return null;
+  }
+}
 
 interface TagPickerPopoverProps {
   isOpen: boolean;
@@ -10,34 +63,6 @@ interface TagPickerPopoverProps {
   anchorEl?: HTMLElement | null;
 }
 
-interface TagConfig {
-  name: string;
-  icon: string;
-  color: string;
-  bg: string;
-}
-
-const TAG_CONFIGS: TagConfig[] = [
-  { name: '808', icon: 'ti-flame', color: '#ff6b81', bg: 'rgba(255, 107, 129, 0.22)' },
-  { name: 'Kick', icon: 'ti-circle-dot', color: '#ff9f43', bg: 'rgba(255, 159, 67, 0.22)' },
-  { name: 'Snare', icon: 'ti-circle-dashed', color: '#feca57', bg: 'rgba(254, 202, 87, 0.22)' },
-  { name: 'Clap', icon: 'ti-hand-stop', color: '#feca57', bg: 'rgba(254, 202, 87, 0.22)' },
-  { name: 'Hi-Hat', icon: 'ti-sparkles', color: '#48dbfb', bg: 'rgba(72, 219, 251, 0.22)' },
-  { name: 'Open Hat', icon: 'ti-ripple', color: '#48dbfb', bg: 'rgba(72, 219, 251, 0.22)' },
-  { name: 'Rim', icon: 'ti-crosshair', color: '#feca57', bg: 'rgba(254, 202, 87, 0.22)' },
-  { name: 'Perc', icon: 'ti-grain', color: '#54a0ff', bg: 'rgba(84, 160, 255, 0.22)' },
-  { name: 'Tom', icon: 'ti-circles', color: '#ff9f43', bg: 'rgba(255, 159, 67, 0.22)' },
-  { name: 'Crash', icon: 'ti-sun', color: '#48dbfb', bg: 'rgba(72, 219, 251, 0.22)' },
-  { name: 'Bass', icon: 'ti-wave-sine', color: '#ff6b81', bg: 'rgba(255, 107, 129, 0.22)' },
-  { name: 'Chords', icon: 'ti-piano', color: '#71c89f', bg: 'rgba(113, 200, 159, 0.22)' },
-  { name: 'Melody', icon: 'ti-music', color: '#9a90ff', bg: 'rgba(154, 144, 255, 0.24)' },
-  { name: 'Lead', icon: 'ti-wand', color: '#9a90ff', bg: 'rgba(154, 144, 255, 0.24)' },
-  { name: 'Pluck', icon: 'ti-guitar-pick', color: '#9a90ff', bg: 'rgba(154, 144, 255, 0.24)' },
-  { name: 'Vox', icon: 'ti-microphone', color: '#1dd1a1', bg: 'rgba(29, 209, 161, 0.22)' },
-  { name: 'FX', icon: 'ti-bolt', color: '#ff9ff3', bg: 'rgba(255, 159, 243, 0.22)' },
-  { name: 'Other', icon: 'ti-dots', color: '#8a92a1', bg: 'rgba(138, 146, 161, 0.22)' },
-];
-
 export const TagPickerPopover: React.FC<TagPickerPopoverProps> = ({
   isOpen,
   onClose,
@@ -46,195 +71,129 @@ export const TagPickerPopover: React.FC<TagPickerPopoverProps> = ({
   anchorEl,
 }) => {
   const popoverRef = useRef<HTMLDivElement>(null);
-  const language = useInterfaceStore((state) => state.language);
-  const isRu = language === 'ru';
-  const [coords, setCoords] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+  const inputRef = useRef<HTMLInputElement>(null);
+  const isRu = useInterfaceStore((state) => state.language) === 'ru';
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
+  const [query, setQuery] = useState('');
+  const [highlighted, setHighlighted] = useState(-1);
+
+  const tags = useMemo(() => filterTags(query), [query]);
 
   useEffect(() => {
     if (!isOpen) return;
+    setQuery('');
+    setHighlighted(-1);
+  }, [isOpen]);
 
-    if (anchorEl) {
-      const rect = anchorEl.getBoundingClientRect();
-      const popoverWidth = 330;
-      const popoverHeight = 270;
+  // Typing narrows the list; the first match is ready for Enter.
+  useEffect(() => {
+    setHighlighted(query.trim() ? 0 : -1);
+  }, [query]);
 
-      let top = rect.bottom + 6;
-      if (top + popoverHeight > window.innerHeight - 12) {
-        top = Math.max(12, rect.top - popoverHeight - 6);
-      }
-
-      let left = rect.left;
-      if (left + popoverWidth > window.innerWidth - 12) {
-        left = window.innerWidth - popoverWidth - 12;
-      }
-      if (left < 12) left = 12;
-
-      setCoords({ top, left });
+  // Place against the real rendered height so the menu never spills off-screen.
+  useLayoutEffect(() => {
+    if (!isOpen || !popoverRef.current) return;
+    const height = popoverRef.current.offsetHeight;
+    const rect = anchorEl?.getBoundingClientRect();
+    if (!rect) {
+      setCoords({ top: Math.max(EDGE, (window.innerHeight - height) / 2), left: Math.max(EDGE, (window.innerWidth - MENU_WIDTH) / 2) });
+      return;
     }
+    let top = rect.bottom + 6;
+    if (top + height > window.innerHeight - EDGE) top = Math.max(EDGE, rect.top - height - 6);
+    const left = Math.min(Math.max(EDGE, rect.left), window.innerWidth - MENU_WIDTH - EDGE);
+    setCoords({ top, left });
+  }, [isOpen, anchorEl, tags.length]);
 
-    const handleClickOutside = (e: MouseEvent | TouchEvent) => {
-      if (
-        popoverRef.current &&
-        !popoverRef.current.contains(e.target as Node) &&
-        (!anchorEl || !anchorEl.contains(e.target as Node))
-      ) {
+  useEffect(() => {
+    if (!isOpen) return;
+    inputRef.current?.focus({ preventScroll: true });
+
+    const handlePointerDown = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as Node;
+      if (popoverRef.current?.contains(target) || anchorEl?.contains(target)) return;
+      onClose();
+    };
+    // Escape belongs to the menu while it is open: it must not also clear the batch selection or close a dialog behind it.
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
         onClose();
       }
     };
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-
-    const handleScroll = () => {
+    const handleScroll = (e: Event) => {
+      if (popoverRef.current?.contains(e.target as Node)) return;
       onClose();
     };
 
-    document.addEventListener('mousedown', handleClickOutside);
-    document.addEventListener('touchstart', handleClickOutside);
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('touchstart', handlePointerDown);
     document.addEventListener('keydown', handleKeyDown);
     window.addEventListener('scroll', handleScroll, true);
-
+    window.addEventListener('resize', onClose);
     return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-      document.removeEventListener('touchstart', handleClickOutside);
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('touchstart', handlePointerDown);
       document.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('scroll', handleScroll, true);
+      window.removeEventListener('resize', onClose);
     };
   }, [isOpen, onClose, anchorEl]);
 
   if (!isOpen) return null;
 
-  const content = (
+  const pick = (tag: string) => {
+    onClose();
+    if (canonicalTag(tag) !== canonicalTag(currentTag)) onSelectTag(tag);
+  };
+
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    const next = moveInGrid(e.key, highlighted, tags.length);
+    if (next !== null) {
+      e.preventDefault();
+      setHighlighted(next);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const tag = tags[highlighted >= 0 ? highlighted : 0];
+      if (tag) pick(tag);
+    }
+  };
+
+  return ReactDOM.createPortal(
     <div
       ref={popoverRef}
-      className="glass-popover"
+      className="glass-popover tag-menu"
       style={{
-        position: 'fixed',
-        top: coords.top,
-        left: coords.left,
-        width: 330,
-        padding: '12px',
-        borderRadius: 20,
-        zIndex: 999999,
-        backgroundColor: '#161b26',
-        border: '1px solid rgba(255, 255, 255, 0.16)',
-        boxShadow: '0 24px 60px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.1)',
-        pointerEvents: 'auto',
+        top: coords?.top ?? -9999,
+        left: coords?.left ?? -9999,
+        // opacity, not visibility: a visibility-hidden input cannot take focus on the first open.
+        opacity: coords ? 1 : 0,
       }}
       onClick={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+      role="dialog"
+      aria-label={isRu ? 'Категория' : 'Category'}
     >
-      {/* Header */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '2px 4px 10px',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-          marginBottom: 10,
-        }}
-      >
-        <span
-          style={{
-            fontSize: 10,
-            fontWeight: 700,
-            textTransform: 'uppercase',
-            letterSpacing: '0.06em',
-            color: 'var(--muted)',
-          }}
-        >
-          {isRu ? 'Сменить категорию' : 'Select Category'}
-        </span>
-        <button
-          type="button"
-          onClick={onClose}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: 'var(--soft)',
-            cursor: 'pointer',
-            padding: 2,
-            display: 'grid',
-            placeItems: 'center',
-            fontSize: 13,
-          }}
-          title={isRu ? 'Закрыть' : 'Close'}
-        >
-          <i className="ti ti-x" />
-        </button>
-      </div>
+      <label className="tag-menu-search">
+        <i className="ti ti-search" aria-hidden="true" />
+        <input
+          ref={inputRef}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={handleInputKeyDown}
+          placeholder={isRu ? 'Найти категорию' : 'Find a category'}
+          aria-label={isRu ? 'Найти категорию' : 'Find a category'}
+          spellCheck={false}
+        />
+        <kbd>Enter</kbd>
+      </label>
 
-      {/* Grid of tags: 3 columns x 6 rows -> All 18 tags perfectly visible without scrolling */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
-          gap: 6,
-        }}
-      >
-        {TAG_CONFIGS.map((t) => {
-          const isSelected = currentTag.toLowerCase() === t.name.toLowerCase();
-          return (
-            <button
-              key={t.name}
-              type="button"
-              onClick={() => {
-                onSelectTag(t.name);
-                onClose();
-              }}
-              style={{
-                height: 31,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                padding: '0 8px',
-                borderRadius: 9,
-                fontSize: 11,
-                fontWeight: isSelected ? 700 : 500,
-                color: isSelected ? '#ffffff' : 'var(--text)',
-                background: isSelected ? t.bg : 'rgba(255, 255, 255, 0.05)',
-                border: isSelected ? `1px solid ${t.color}` : '1px solid rgba(255, 255, 255, 0.08)',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-                textAlign: 'left',
-              }}
-              onMouseEnter={(e) => {
-                if (!isSelected) {
-                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)';
-                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.16)';
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (!isSelected) {
-                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
-                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
-                }
-              }}
-            >
-              {/* Icon */}
-              <i
-                className={`ti ${t.icon}`}
-                style={{
-                  fontSize: 13,
-                  color: t.color,
-                  flexShrink: 0,
-                  display: 'grid',
-                  placeItems: 'center',
-                }}
-              />
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-                {t.name}
-              </span>
-              {isSelected && (
-                <i className="ti ti-check" style={{ fontSize: 10, color: t.color, flexShrink: 0 }} />
-              )}
-            </button>
-          );
-        })}
-      </div>
-    </div>
+      {tags.length > 0 ? (
+        <TagGrid tags={tags} currentTag={currentTag} highlighted={highlighted} onPick={pick} onHover={setHighlighted} />
+      ) : (
+        <div className="tag-menu-empty">{isRu ? 'Нет такой категории' : 'No matching category'}</div>
+      )}
+    </div>,
+    document.body
   );
-
-  return ReactDOM.createPortal(content, document.body);
 };

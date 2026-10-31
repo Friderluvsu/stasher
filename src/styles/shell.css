@@ -36,7 +36,7 @@ body[data-platform="win32"] .workspace-frame {
   margin: 14px;
   padding: 24px 14px 16px;
   border-radius: var(--radius-panel);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  box-shadow: none;
 }
 
 .brand-row {
@@ -58,7 +58,7 @@ body[data-platform="win32"] .workspace-frame {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #0e1017;
+  color: var(--contrast-text);
   font-size: 13px;
   flex-shrink: 0;
 }
@@ -70,8 +70,8 @@ body[data-platform="win32"] .workspace-frame {
   font-size: 9px;
   font-weight: 600;
   letter-spacing: 0.04em;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--line);
+  background: transparent;
   color: var(--muted);
 }
 
@@ -98,9 +98,7 @@ body[data-platform="win32"] .workspace-frame {
 .side-navigation-label {
   padding: 0 10px 8px;
   font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  font-weight: 600;
   color: var(--soft);
   flex-shrink: 0;
 }
@@ -111,10 +109,10 @@ body[data-platform="win32"] .workspace-frame {
   grid-template-columns: 20px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
-  min-height: 38px;
+  min-height: 34px;
   padding: 0 10px;
   border: 0;
-  border-radius: 12px;
+  border-radius: 8px;
   background: transparent;
   color: var(--muted);
   text-align: left;
@@ -138,7 +136,7 @@ body[data-platform="win32"] .workspace-frame {
   border: 1px solid var(--line);
   background: var(--panel-strong);
   color: var(--text);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.38);
+  box-shadow: none;
 }
 
 .side-navigation button > span:not(.navigation-count),
@@ -148,6 +146,11 @@ body[data-platform="win32"] .workspace-frame {
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.navigation-count.is-strong {
+  background: var(--accent);
+  color: var(--contrast-text);
 }
 
 .navigation-count {
@@ -168,7 +171,7 @@ body[data-platform="win32"] .workspace-frame {
   flex-shrink: 0;
   border-top: 1px solid var(--line-dark);
   padding-top: 8px;
-  border-radius: 12px;
+  border-radius: 8px;
 }
 
 .workspace-main {
@@ -242,6 +245,10 @@ body[data-platform="darwin"] .window-drag-region {
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+  /* The topbar is transparent (the window shows macOS vibrancy), so content scrolling under it would show through
+     the tab buttons. Fade the scroller out under the bar instead of painting an opaque strip. */
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, transparent 40px, #000 56px);
+  mask-image: linear-gradient(to bottom, transparent 0, transparent 40px, #000 56px);
 }
 
 .workspace-scroll-area::-webkit-scrollbar {
@@ -265,8 +272,8 @@ body[data-platform="darwin"] .window-drag-region {
 }
 
 .workspace-switcher button {
-  min-height: 34px;
-  padding: 0 14px;
+  min-height: 32px;
+  padding: 0 12px;
   border: 0;
   border-radius: var(--radius-control);
   background: transparent;
@@ -290,7 +297,7 @@ body[data-platform="darwin"] .window-drag-region {
 .workspace-switcher button.is-active {
   background: var(--panel-strong);
   color: var(--text);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 4px 12px rgba(0, 0, 0, 0.25);
+  box-shadow: none;
 }
 
 .profile-button {
@@ -323,4 +330,43 @@ body[data-platform="darwin"] .window-drag-region {
   .side-navigation { gap: 1px; }
   .side-navigation button { min-height: 32px; }
   .side-settings { min-height: 32px; }
+}
+
+.search-clear,
+.search-hint {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+}
+
+.search-clear {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--soft);
+  cursor: pointer;
+}
+
+.search-clear:hover {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text);
+}
+
+.search-hint {
+  min-width: 18px;
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--soft);
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+  pointer-events: none;
 }
