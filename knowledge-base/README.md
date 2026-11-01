@@ -11,7 +11,7 @@
 | Что делает Stasher и для кого: хранилище MIDI, StashSound, Kit Builder, Визуализатор | [product/overview.md](product/overview.md) |
 | Как пользоваться Визуализатором: источники, «Луп» и «Песня», 41 стиль, звук, экспорт, клавиши, пределы | [product/visualizer.md](product/visualizer.md) |
 | Из чего состоит приложение: Electron, React, FastAPI, где лежат данные, как интерфейс говорит с движком | [architecture/overview.md](architecture/overview.md) |
-| Как читаются проекты FL Studio: pyflp, заплатки, событие 172 у FL 25, разбор плейлиста, октавы, номера паттернов | [architecture/flp-parsing.md](architecture/flp-parsing.md) |
+| Как читаются проекты FL Studio: pyflp, заплатки, событие 172 у FL 25/26, разбор плейлиста, октавы, номера паттернов | [architecture/flp-parsing.md](architecture/flp-parsing.md) |
 | Как устроен Визуализатор внутри: карта модулей, сцена, рендерер, индекс нот, анализ звука, экспорт, часы, цифры скорости | [architecture/visualizer.md](architecture/visualizer.md) |
 | Как запустить у себя, как гонять тесты, как проверить вручную | [development/setup-and-testing.md](development/setup-and-testing.md) |
 | Почему решили так, а не иначе | [development/decisions.md](development/decisions.md) |

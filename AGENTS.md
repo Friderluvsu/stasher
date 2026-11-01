@@ -38,7 +38,7 @@ Details live in `knowledge-base/` (Russian; start with `knowledge-base/README.md
   - `./node_modules/.bin/vite build --outDir <scratch> --emptyOutDir` (never build into `dist/`, Electron loads it).
 - Shell caveat on this Mac: `node`, `npm`, `npx` are broken nvm functions in the agent shell. Call `./node_modules/.bin/<tool>`, or first run `unset -f node npm npx; export PATH=/Users/frider/.nvm/versions/node/v22.22.3/bin:$PATH`. `start.sh` uses `npx`, so it fails there.
 - Backend tests (env vars matter, see invariant 9):
-  `HOME=<scratch> STASHER_DB_PATH=<scratch>/t.db STASHER_TEST_FLP=<repo>/node_modules/.stasher-qa/skin164.flp backend/venv/bin/python -m unittest discover -s backend/tests -t .` run from the repo root -> `Ran 42 tests ... OK`.
+  `HOME=<scratch> STASHER_DB_PATH=<scratch>/t.db STASHER_TEST_FLP=<repo>/node_modules/.stasher-qa/skin164.flp backend/venv/bin/python -m unittest discover -s backend/tests -t .` run from the repo root -> `Ran 43 tests ... OK`.
 - Never run `npm run release*` (it bumps the version, pushes `main` and a `v*` tag, and the tag triggers the release build).
 - Commit/push only when the owner asks. Do not install packages (`npm i`, `pip install`) without the owner's OK: dependencies are minimal on purpose (`@tonejs/midi` is the only runtime dependency).
 
@@ -60,7 +60,7 @@ Details live in `knowledge-base/` (Russian; start with `knowledge-base/README.md
 6. **`pattern_index` is not the FL pattern number.** `pattern_index` is the position in pyflp's pattern list (0-based); playlist clips reference FL's 1-based number (`item_index - 20480`). Always map through `pattern_iids` (built in `parse_flp_project`), never assume `iid - 1`.
 7. **FLP reading must not raise to the user or touch their file.**
    - `extract_song_timeline` returns `None` on any failure (the UI then offers only "Loop").
-   - Files with FL 25's 3-byte event 172 are parsed from a padded temp copy that is deleted at once. Playlist item size (32/60/80 bytes) is detected from content.
+   - Event 172 is 3 bytes in FL 25+ (FL 26 writes it twice); such files are parsed from a padded temp copy that is deleted at once. Playlist item size (32/60/80 bytes) is detected from content.
    - Muted clips and channels are NOT read yet (see `knowledge-base/development/known-gaps.md`).
 8. **The Visualizer never writes the vault.**
    - `/api/visualizer/parse-flp` must not call `save_project`, must use `resolve_samples=False`, and must not return MIDI bytes or sample paths (covered by `test_visualizer_flp.py`).
@@ -78,7 +78,7 @@ Details live in `knowledge-base/` (Russian; start with `knowledge-base/README.md
 
 ## Testing
 
-- Backend: 27 of the 42 tests are in `backend/tests/test_visualizer_flp.py` (synthetic FL 25 files, 32/60/80-byte playlists, API shaping; 2 tests on a real FLP when `STASHER_TEST_FLP` is set). `test_tag_editing.py` (5) guards tag routes and rename storage on a throwaway DB; `test_library_queries.py` (4) guards list paging and search with punctuation.
+- Backend: 28 of the 43 tests are in `backend/tests/test_visualizer_flp.py` (synthetic FL 25/26 files, 32/60/80-byte playlists, API shaping; 2 tests on a real FLP when `STASHER_TEST_FLP` is set). `test_tag_editing.py` (5) guards tag routes and rename storage on a throwaway DB; `test_library_queries.py` (4) guards list paging and search with punctuation.
 - Browser checks of the library: `.claude/launch.json` has `backend-qa` (engine on a scratch `HOME`/`STASHER_DB_PATH`), so editing tags in the preview never touches `stasher_data/`.
 - `test_audio_analyzer.py` is pytest-style: only CI runs it (pytest is not in the local venv).
 - The frontend has no automated tests. Verify in the browser by dropping files with a synthetic `drop` event (recipe in `knowledge-base/development/setup-and-testing.md`).
