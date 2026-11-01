@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, nativeImage, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
@@ -371,6 +371,31 @@ ipcMain.on('ondragstart', (event, { type = 'midi', id, patternId, fileName, base
   } catch (err) {
     console.error('[Stasher] Electron startDrag failed:', err);
   }
+});
+
+// ─── macOS folder access ───────────────────────────────
+// The engine reads FL projects and samples in these folders; macOS asks once per folder on first access.
+// Touching them from the app (the engine is its child process, so the grant covers it) shows all the
+// prompts at once instead of in the middle of a scan. Async reads: a pending prompt must not freeze the UI.
+const PROTECTED_FOLDERS = ['Documents', 'Downloads', 'Desktop', 'Music'];
+
+ipcMain.handle('request-folder-access', async () => {
+  if (process.platform !== 'darwin') return [];
+  const results = [];
+  for (const name of PROTECTED_FOLDERS) {
+    try {
+      await fs.promises.readdir(path.join(app.getPath('home'), name));
+      results.push({ name, granted: true });
+    } catch {
+      results.push({ name, granted: false });
+    }
+  }
+  return results;
+});
+
+ipcMain.handle('open-full-disk-access', () => {
+  if (process.platform !== 'darwin') return false;
+  return shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles').then(() => true, () => false);
 });
 
 // ─── App lifecycle ─────────────────────────────────────

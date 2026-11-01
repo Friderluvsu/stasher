@@ -3,6 +3,21 @@ import type { InterfaceLanguage, InterfaceTheme } from '../state/interfaceStore'
 import { useInterfaceStore } from '../state/interfaceStore';
 import { notify } from '../state/toastStore';
 
+type FolderAccess = { name: string; granted: boolean };
+
+type DesktopBridge = {
+  platform?: string;
+  requestFolderAccess?(): Promise<FolderAccess[]>;
+  openFullDiskAccess?(): Promise<boolean>;
+};
+
+const FOLDER_NAMES_RU: Record<string, string> = {
+  Documents: 'Документы',
+  Downloads: 'Загрузки',
+  Desktop: 'Рабочий стол',
+  Music: 'Музыка',
+};
+
 type ProfileMenuProps = {
   open: boolean;
   onClose(): void;
@@ -53,6 +68,38 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({ open, onClose }) => {
   }
 
   const isRu = language === 'ru';
+  const bridge = (window as unknown as { electronAPI?: DesktopBridge }).electronAPI;
+  // Only macOS asks for folder access; Windows and the browser dev build need nothing here.
+  const canRequestAccess = bridge?.platform === 'darwin' && typeof bridge.requestFolderAccess === 'function';
+
+  async function requestFolderAccess() {
+    if (!bridge?.requestFolderAccess) return;
+    try {
+      const results = await bridge.requestFolderAccess();
+      const denied = results.filter((item) => !item.granted).map((item) => (isRu ? FOLDER_NAMES_RU[item.name] || item.name : item.name));
+      if (!denied.length) {
+        notify.success(isRu ? 'Доступ к папкам выдан' : 'Folder access granted', 'Stasher');
+      } else {
+        notify.error(
+          isRu
+            ? `Нет доступа: ${denied.join(', ')}. Разрешите в Системных настройках → Конфиденциальность → Файлы и папки.`
+            : `No access: ${denied.join(', ')}. Allow it in System Settings → Privacy → Files and Folders.`,
+          'Stasher'
+        );
+      }
+    } catch {
+      notify.error(isRu ? 'Не удалось запросить доступ' : 'Could not request access', 'Stasher');
+    }
+  }
+
+  async function openFullDiskAccess() {
+    const opened = await bridge?.openFullDiskAccess?.().catch(() => false);
+    if (opened) {
+      notify.info(isRu ? 'Включите Stasher в списке «Полный доступ к диску»' : 'Turn on Stasher in the Full Disk Access list', 'Stasher');
+    } else {
+      notify.error(isRu ? 'Не удалось открыть Системные настройки' : 'Could not open System Settings', 'Stasher');
+    }
+  }
 
   return (
     <div className="profile-menu-anchor" ref={containerRef}>
@@ -156,6 +203,22 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({ open, onClose }) => {
             </button>
           </div>
         </div>
+
+        {canRequestAccess ? (
+          <div className="profile-menu-section">
+            <span className="profile-menu-label">{isRu ? 'Доступ к файлам' : 'File access'}</span>
+            <div className="profile-segments">
+              <button onClick={() => void requestFolderAccess()} type="button">
+                <i className="ti ti-folder-check" aria-hidden="true" />
+                {isRu ? 'Папки' : 'Folders'}
+              </button>
+              <button onClick={() => void openFullDiskAccess()} type="button">
+                <i className="ti ti-shield-lock" aria-hidden="true" />
+                {isRu ? 'Весь диск' : 'Full disk'}
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         <button
           className="profile-menu-action"

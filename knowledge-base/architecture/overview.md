@@ -5,7 +5,7 @@
 - **Оболочка:** Electron 33 (`electron/main.cjs`, `electron/preload.cjs`). Окно с интерфейсом плюс дочерний процесс с движком.
 - **Интерфейс:** React 19, TypeScript 5.7, Vite 6, Tailwind 4, zustand 5 для состояния, иконки Tabler (шрифт). Стили — в `src/styles/*.css`. Для чтения MIDI-файлов — `@tonejs/midi`: это единственная запись в `dependencies` (добавлена Визуализатором), остальные пакеты лежат в `devDependencies`, интерфейс собирает Vite.
 - **Движок:** Python 3.10+ (локально в venv сейчас 3.14.6), FastAPI + uvicorn, SQLite, `pyflp` 2.2.1 (чтение `.flp`), `mido` (запись `.mid`), `numpy`.
-- **Сборка:** `electron-builder` (macOS DMG/ZIP, Windows NSIS), движок упаковывается PyInstaller в один файл `stasher-backend`; CI и выпуск — GitHub Actions (`.github/workflows/`).
+- **Сборка:** `electron-builder` (macOS arm64 DMG, Windows x64 NSIS), движок упаковывается PyInstaller в один файл `stasher-backend`; CI и выпуск — GitHub Actions (`.github/workflows/`).
 
 В `tsconfig.json` `strict: false` — типы помогают, но не ловят `null`/`undefined` сами. Код визуализатора написан так, будто строгий режим включён.
 
@@ -64,4 +64,4 @@ Electron (main.cjs)  ──запускает──▶  Движок FastAPI  12
 
 ## Как собирается и выходит
 
-`npm run app` = `vite build && electron .`. Выпуск: `npm run release*` поднимает версию, пушит `main` с тегом `v*`, и по тегу GitHub Actions собирает установщики (Windows x64, macOS arm64 и Intel). Движок для упаковки собирает `npm run build:backend` (PyInstaller): каждый новый модуль движка нужно добавить в `--hidden-import` в `package.json` — для `flp_playlist` это уже сделано.
+`npm run app` = `vite build && electron .`. Выпуск: `npm run release*` поднимает версию, пушит `main` с тегом `v*`, и по тегу GitHub Actions собирает установщики (Windows x64 и macOS arm64) и кладёт в релиз только их — `.exe` и `.dmg`, без zip, blockmap и `latest*.yml` (автообновления нет). Движок для упаковки собирает `npm run build:backend` (PyInstaller): каждый новый модуль движка нужно добавить в `--hidden-import` в `package.json` — для `flp_playlist` это уже сделано.

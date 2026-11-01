@@ -107,6 +107,11 @@
         "mac": {
             "icon": "icons/icon.icns",
             "artifactName": "${productName}-${version}-${arch}.${ext}",
+            "extendInfo": {
+                "NSDocumentsFolderUsageDescription": "Stasher finds your FL Studio projects and samples in Documents.",
+                "NSDownloadsFolderUsageDescription": "Stasher finds downloaded projects, MIDI files and samples in Downloads.",
+                "NSDesktopFolderUsageDescription": "Stasher finds projects and samples on the Desktop."
+            },
             "target": [
                 {
                     "target": "dmg",
