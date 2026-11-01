@@ -58,6 +58,7 @@ def _event_spans(data: bytes) -> Iterator[Tuple[int, int, int]]:
     declared = struct.unpack_from("<I", data, offset + 4)[0]
     pos = offset + 8
     end = len(data) if declared <= 0 else min(len(data), pos + declared)
+    version: Optional[Tuple[int, ...]] = None
     while pos < end:
         event_id = data[pos]
         pos += 1
@@ -66,7 +67,7 @@ def _event_spans(data: bytes) -> Iterator[Tuple[int, int, int]]:
         elif event_id < DWORD:
             size = 2
         elif event_id < TEXT:
-            size = 3 if event_id == EVENT_SHORT_DWORD and _is_short_dword(data, pos, end) else 4
+            size = 3 if event_id == EVENT_SHORT_DWORD and _is_short_dword(data, pos, end, version) else 4
         else:
             varint = _read_varint(data, pos, end)
             if varint is None:
@@ -74,6 +75,8 @@ def _event_spans(data: bytes) -> Iterator[Tuple[int, int, int]]:
             size, pos = varint
         if pos + size > end:
             return
+        if event_id == EVENT_FL_VERSION and version is None:
+            version = parse_version(data[pos:pos + size].decode("ascii", "ignore"))
         yield event_id, pos, size
         pos += size
 
@@ -123,10 +126,13 @@ def _read_varint(data: bytes, pos: int, end: int) -> Optional[Tuple[int, int]]:
     return None
 
 
-def _is_short_dword(data: bytes, pos: int, end: int) -> bool:
+def _is_short_dword(data: bytes, pos: int, end: int, version: Optional[Tuple[int, ...]] = None) -> bool:
     # FL 25 writes event 172 with only 3 payload bytes. Reading 4 swallows the id of the
-    # UTF-16 text event that follows and desynchronises the stream (PyFLP then misses the
-    # tempo event), so take 3 bytes when they are followed by a well-formed UTF-16 text event.
+    # event that follows and desynchronises the stream (PyFLP then misses the tempo event).
+    # FL 26 also writes a second 172 followed by a byte event, so for FL 25+ every 172 is
+    # short; without a version, take 3 bytes when a well-formed UTF-16 text event follows.
+    if version and version[0] >= 25:
+        return pos + 3 <= end
     if pos + 4 >= end or data[pos + 3] < TEXT or data[pos + 3] >= DATA:
         return False
     varint = _read_varint(data, pos + 4, end)

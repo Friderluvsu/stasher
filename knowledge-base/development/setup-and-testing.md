@@ -47,7 +47,7 @@ STASHER_TEST_FLP=/Users/frider/Documents/iamcoder/stasher/node_modules/.stasher-
 backend/venv/bin/python -m unittest discover -s backend/tests -t .
 ```
 
-Ожидаемо: `Ran 42 tests … OK`.
+Ожидаемо: `Ran 43 tests … OK`.
 
 ### Почему `HOME` и `STASHER_DB_PATH`
 

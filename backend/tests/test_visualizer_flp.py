@@ -126,8 +126,18 @@ class PlaylistDecodingTest(unittest.TestCase):
         text = "FL Studio 25\x00".encode("utf-16-le")
         data = _flp(_version("25.2.5.5055"), _event(28, b"\x01"), b"\xac\x01\x01\x00", _event(192, text), _event(156, struct.pack("<I", 164000)))
         self.assertEqual(read_tempo(data), 164.0)
-        regular = _flp(_version("25.2.5.5055"), _event(172, struct.pack("<I", 5)), _event(156, struct.pack("<I", 140500)))
+        regular = _flp(_version("21.2.3.4004"), _event(172, struct.pack("<I", 5)), _event(156, struct.pack("<I", 140500)))
         self.assertEqual(read_tempo(regular), 140.5)
+
+    def test_fl26_second_short_event_keeps_stream_aligned(self):
+        # FL 26 adds a second 3-byte event 172 followed by a byte event, not by text
+        text = "FL Studio 26\x00".encode("utf-16-le")
+        data = _flp(
+            _version("26.1.3.5336"), b"\xac\x01\x01\x00", _event(192, text),
+            b"\xac\x00\x01\x00", _event(0, b"\x00"), _event(237, bytes(16)), _event(156, struct.pack("<I", 154000)),
+        )
+        self.assertEqual(read_tempo(data), 154.0)
+        self.assertEqual([event_id for event_id, _ in iter_flp_events(data)], [199, 172, 192, 172, 0, 237, 156])
         legacy = _flp(_version("3.0.0"), _event(66, struct.pack("<H", 128)), _event(93, struct.pack("<H", 250)))
         self.assertEqual(read_tempo(legacy), 128.25)
 
@@ -136,17 +146,21 @@ def _note(pos, length, key, rack_channel=0, velocity=100):
     return struct.pack("<IHHIHHBBBBBBBB", pos, 0, rack_channel, length, key, 0, 120, 0, 0, 0, 64, velocity, 128, 128)
 
 
-def _fl25_project(pattern_length=None, short_dword=True):
-    """Smallest project PyFLP can read channels from, laid out like FL 25: a 3-byte event 172, then a UTF-16 text event."""
+def _fl25_project(pattern_length=None, short_dword=True, fl26=False):
+    """Smallest project PyFLP can read channels from, laid out like FL 25: a 3-byte event 172, then a UTF-16 text event.
+
+    ``short_dword=False`` is an older project with a regular 4-byte 172; ``fl26`` adds FL 26's second short 172.
+    """
     pattern = [_event(65, struct.pack("<H", 1))]
     if pattern_length is not None:
         pattern.append(_event(164, struct.pack("<I", pattern_length)))
     pattern.append(_event(224, _note(0, 96, 61) + _note(96, 96, 64)))
     return _flp(
-        _version("25.2.5.5055"),
+        _version(("26.1.3.5336" if fl26 else "25.2.5.5055") if short_dword else "21.2.3.4004"),
         _event(28, b"\x01"),
         b"\xac\x01\x01\x00" if short_dword else b"\xac\x01\x01\x00\x00",
         _event(192, b"F\x00L\x00" * 13 + b"\x00\x00"),
+        *([b"\xac\x00\x01\x00", _event(0, b"\x00"), _event(237, bytes(16))] if fl26 else []),
         _event(156, struct.pack("<I", 164000)),
         _event(231, "Unsorted\x00".encode("utf-16-le")),
         _event(64, struct.pack("<H", 0)),
@@ -159,17 +173,16 @@ def _fl25_project(pattern_length=None, short_dword=True):
 
 class ShortDwordEventTest(unittest.TestCase):
     def test_padding_adds_one_byte_per_event_and_fixes_the_chunk_size(self):
-        data = _fl25_project()
-        padded = pad_short_dword_events(data)
-        self.assertEqual(len(padded), len(data) + 1)
-        self.assertEqual(struct.unpack_from("<I", padded, 18)[0], len(padded) - 22)
-        before = list(iter_flp_events(data))
-        after = list(iter_flp_events(padded))
-        self.assertEqual([event_id for event_id, _ in before], [event_id for event_id, _ in after])
-        self.assertEqual([len(payload) for event_id, payload in after if event_id == 172], [4])
-        self.assertEqual(next(payload for event_id, payload in after if event_id == 172), b"\x01\x01\x00\x00")
-        self.assertEqual([payload for event_id, payload in before if event_id != 172], [payload for event_id, payload in after if event_id != 172])
-        self.assertEqual(pad_short_dword_events(padded), padded, "padding twice must not change anything")
+        # The padded copy is only for PyFLP (4 bytes per 172); our own reader always reads the original
+        for data, cuts in ((_fl25_project(), [b"\xac\x01\x01\x00"]), (_fl25_project(fl26=True), [b"\xac\x01\x01\x00", b"\xac\x00\x01\x00"])):
+            padded = pad_short_dword_events(data)
+            self.assertEqual(len(padded), len(data) + len(cuts))
+            self.assertEqual(struct.unpack_from("<I", padded, 18)[0], len(padded) - 22)
+            expected = data
+            for marker in cuts:
+                at = expected.index(marker) + len(marker)
+                expected = expected[:at] + b"\x00" + expected[at:]
+            self.assertEqual(padded[22:], expected[22:])
 
     def test_other_streams_are_returned_unchanged(self):
         regular = _fl25_project(short_dword=False)
@@ -186,12 +199,13 @@ class ShortDwordEventTest(unittest.TestCase):
         self.assertEqual(padded[-5:], data[-5:])
 
     def test_pyflp_reads_the_channel_list(self):
-        with tempfile.TemporaryDirectory() as folder:
-            path = os.path.join(folder, "fl25.flp")
-            with open(path, "wb") as handle:
-                handle.write(_fl25_project())
-            project = load_pyflp_project(path, _fl25_project())
-            self.assertEqual([channel.display_name or channel.name for channel in project.channels], ["Kick"])
+        for fl26 in (False, True):
+            with tempfile.TemporaryDirectory() as folder:
+                path = os.path.join(folder, "project.flp")
+                with open(path, "wb") as handle:
+                    handle.write(_fl25_project(fl26=fl26))
+                project = load_pyflp_project(path, _fl25_project(fl26=fl26))
+                self.assertEqual([channel.display_name or channel.name for channel in project.channels], ["Kick"])
 
     def test_parse_keeps_channels_and_plain_pattern_numbers(self):
         with tempfile.TemporaryDirectory() as folder:
